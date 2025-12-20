@@ -1,0 +1,57 @@
+{
+  "name": "socialhub",
+  "version": "1.0.0",
+  "description": "All your social media in one app",
+  "author": "Leonard Pauli <goafucheng@gmail.com>",
+  "main": "electron/main.js",
+
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development electron .",
+    "start": "electron .",
+    "build:react": "cd app && npm run build",
+    "build": "npm run build:react && electron-builder",
+    "dist": "electron-builder"
+  },
+
+  "build": {
+    "appId": "com.yourcompany.yourapp",
+    "productName": "SocialHub",
+
+    "directories": {
+      "app": ".",
+      "output": "dist_electron"
+    },
+
+    "files": [
+      "electron/**/*",
+      "app/dist/**/*"
+    ],
+
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+
+    "win": {
+      "target": "nsis"
+    },
+
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+
+  "dependencies": {
+    "electron-log": "^5.0.0",
+    "electron-updater": "^6.1.1"
+  },
+
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.2.0",
+    "typescript": "^5.4.0"
+  }
+}
