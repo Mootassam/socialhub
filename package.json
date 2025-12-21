@@ -1,6 +1,6 @@
 {
   "name": "socialhub",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "All your social media in one app",
   "author": "Leonard Pauli <goafucheng@gmail.com>",
   "main": "electron/main.js",
@@ -39,7 +39,14 @@
       "oneClick": false,
       "perMachine": true,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Mootassam",
+        "repo": "socialhub"
+      }
+    ]
   },
 
   "dependencies": {

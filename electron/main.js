@@ -1,6 +1,12 @@
-const { app, BrowserWindow, Menu, Tray, shell, ipcMain,  session, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeTheme, session, Notification, net } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const isDev = process.env.NODE_ENV === 'development';
+
+// Configure Auto Updater
+autoUpdater.autoDownload = false;
+autoUpdater.logger = require("electron-log");
+autoUpdater.logger.transports.file.level = "info";
 
 // Optimization Flags
 app.commandLine.appendSwitch('disable-smooth-scrolling'); // Save CPU
@@ -184,9 +190,53 @@ ipcMain.handle('create-floating-window', (event, { url, title, width, height }) 
   return floatingWindow.id;
 });
 
+// Auto Updater IPC Handlers
+ipcMain.handle('check-for-updates', () => {
+  if (!isDev) {
+    autoUpdater.checkForUpdates();
+  }
+});
+
+ipcMain.handle('start-download-update', () => {
+  autoUpdater.downloadUpdate();
+});
+
+ipcMain.handle('quit-and-install-update', () => {
+  autoUpdater.quitAndInstall();
+});
+
 app.whenReady().then(() => {
   // Ensure Windows notifications work
   try { app.setAppUserModelId('com.yourcompany.yourapp'); } catch { }
+
+  // Auto Updater Events
+  autoUpdater.on('update-available', (info) => {
+    if (mainWindow) mainWindow.webContents.send('update-available', info);
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    if (mainWindow) mainWindow.webContents.send('update-not-available', info);
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    if (mainWindow) mainWindow.webContents.send('download-progress', progressObj);
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    if (mainWindow) mainWindow.webContents.send('update-downloaded', info);
+  });
+
+  autoUpdater.on('error', (err) => {
+    if (mainWindow) mainWindow.webContents.send('update-error', err.toString());
+  });
+
+  // Check for updates on startup (after a short delay to ensure UI is ready)
+  setTimeout(() => {
+    if (!isDev) {
+      autoUpdater.checkForUpdates();
+    }
+  }, 3000);
+
   // Optimize memory and background throttling
   app.commandLine.appendSwitch('disable-site-isolation-trials'); // Save memory (trade-off: security)
   app.commandLine.appendSwitch('renderer-process-limit', '100'); // Limit processes

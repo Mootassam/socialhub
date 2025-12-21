@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import AccountWebView from './components/AccountWebView';
+import UpdateNotification from './components/UpdateNotification';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
 interface Provider {
@@ -825,6 +826,7 @@ const AccountManager: React.FC = () => {
           </div>
         </div>
       </div>
+      <UpdateNotification />
     </div>
   );
 };
