@@ -1,6 +1,12 @@
-const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeTheme, session, Notification } = require('electron');
+const { app, BrowserWindow, Menu, Tray, shell, ipcMain,  session, Notification } = require('electron');
 const path = require('path');
 const isDev = process.env.NODE_ENV === 'development';
+
+// Optimization Flags
+app.commandLine.appendSwitch('disable-smooth-scrolling'); // Save CPU
+app.commandLine.appendSwitch('wm-window-animations-disabled'); // Save GPU
+// app.commandLine.appendSwitch('disable-gpu-compositing'); // Too aggressive, might flicker
+// app.commandLine.appendSwitch('disable-gpu'); // Too aggressive
 
 let mainWindow;
 let tray = null;

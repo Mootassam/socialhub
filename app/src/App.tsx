@@ -32,12 +32,17 @@ const AccountManager: React.FC = () => {
     { id: 13, name: 'Tinder', icon: './provider/tinder.png', color: '#e24670' },
     { id: 14, name: 'Snapchat', icon: './provider/snapchat.png', color: '#fffc00' },
     { id: 15, name: 'LinkedIn', icon: './provider/linkedin.png', color: '#0a66c2' },
-    { id: 16, name: 'Skype', icon: './provider/skype.png', color: '#3a76f0' },
+    { id: 16, name: 'Gmail', icon: './provider/gmail.png', color: '#ea4335' },
     { id: 17, name: 'VK', icon: './provider/vk.png', color: '#4c75a3' },
     { id: 19, name: 'DeepSeek', icon: './provider/deepseek.svg', color: '#5d5fef' },
     { id: 20, name: 'ChatGPT', icon: './provider/chatgpt.png', color: '#10a37f' },
     { id: 21, name: 'Google Sheets', icon: './provider/google-sheets.png', color: '#0b57d0' },
     { id: 22, name: 'Google Voice', icon: './provider/Google_Voice.png', color: '#0b57d0' },
+    { id: 23, name: 'X (Twitter)', icon: './provider/twitter.png', color: '#000000' },
+    { id: 24, name: 'Zalo', icon: './provider/zalo.png', color: '#0068ff' },
+    { id: 25, name: 'Hangouts', icon: './provider/hangouts.png', color: '#0f9d58' },
+    { id: 26, name: 'TextNow', icon: './provider/textnow.png', color: '#8839fb' },
+    { id: 27, name: 'Text Free', icon: './provider/textfree.png', color: '#6633cc' },
   ];
 
   const providerUrls: Record<number, string> = {
@@ -53,12 +58,17 @@ const AccountManager: React.FC = () => {
     13: "https://tinder.com/app/login",
     14: "https://www.snapchat.com/",
     15: "https://www.linkedin.com/login",
-    16: "https://web.skype.com/",
+    16: "https://mail.google.com/",
     17: "https://vk.com",
     19: "https://chat.deepseek.com",
     20: "https://chatgpt.com/",
     21: "https://docs.google.com/spreadsheets/",
     22: "https://voice.google.com/",
+    23: "https://twitter.com/login",
+    24: "https://chat.zalo.me/",
+    25: "https://hangouts.google.com/",
+    26: "https://www.textnow.com/login",
+    27: "https://messages.textfree.us/login",
   };
 
   // State
@@ -417,7 +427,7 @@ const AccountManager: React.FC = () => {
             // This aggressively saves RAM by unloading hidden tabs if background updates are off.
             const hasBeenLoaded = loadedAccountKeys.includes(k);
             const shouldLoad = visible || (backgroundUpdatesEnabled && hasBeenLoaded);
-            
+
             const url = shouldLoad ? (providerUrls[p.id] || 'about:blank') : 'about:blank';
             return (
               <AccountWebView
@@ -743,78 +753,78 @@ const AccountManager: React.FC = () => {
       {renderSettingsModal()}
 
       {/* Customer Support Modal */}
- {/* Customer Support Modal - Simplified One Line */}
-<div className={`modal ${showSupportModal ? 'active' : ''}`} onClick={() => setShowSupportModal(false)}>
-  <div className="modal-content support-modal" onClick={e => e.stopPropagation()}>
-    <div className="modal-header">
-      <div className="modal-title">
-        <i className="fas fa-headset" style={{ marginRight: '10px', color: '#5d5fef' }}></i>
-        Customer Support
-      </div>
-      <div className="modal-close" onClick={() => setShowSupportModal(false)}>
-        <i className="fas fa-times"></i>
-      </div>
-    </div>
-    
-    <div className="modal-body support-body">
-      <div className="support-intro">
-        <h3>Need Help?</h3>
-        <p>Contact our support team through any of the channels below</p>
-      </div>
-      
-      <div className="support-channels-single-line">
-        <div className="support-channel-item">
-          <div className="channel-icon-wrapper email">
-            <i className="fas fa-envelope"></i>
+      {/* Customer Support Modal - Simplified One Line */}
+      <div className={`modal ${showSupportModal ? 'active' : ''}`} onClick={() => setShowSupportModal(false)}>
+        <div className="modal-content support-modal" onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <div className="modal-title">
+              <i className="fas fa-headset" style={{ marginRight: '10px', color: '#5d5fef' }}></i>
+              Customer Support
+            </div>
+            <div className="modal-close" onClick={() => setShowSupportModal(false)}>
+              <i className="fas fa-times"></i>
+            </div>
           </div>
-          <div className="channel-content">
-            <h4>Email</h4>
-            <p className="channel-detail">support@yourapp.com</p>
-            <a href="mailto:support@yourapp.com" className="channel-action">
-              Email us
-            </a>
+
+          <div className="modal-body support-body">
+            <div className="support-intro">
+              <h3>Need Help?</h3>
+              <p>Contact our support team through any of the channels below</p>
+            </div>
+
+            <div className="support-channels-single-line">
+              <div className="support-channel-item">
+                <div className="channel-icon-wrapper email">
+                  <i className="fas fa-envelope"></i>
+                </div>
+                <div className="channel-content">
+                  <h4>Email</h4>
+                  <p className="channel-detail">support@yourapp.com</p>
+                  <a href="mailto:support@yourapp.com" className="channel-action">
+                    Email us
+                  </a>
+                </div>
+              </div>
+
+              <div className="support-channel-item">
+                <div className="channel-icon-wrapper telegram">
+                  <i className="fab fa-telegram"></i>
+                </div>
+                <div className="channel-content">
+                  <h4>Telegram</h4>
+                  <p className="channel-detail">@yourchannel</p>
+                  <a href="https://t.me/leo6_6_6" target="_blank" rel="noopener noreferrer" className="channel-action">
+                    Join Chat
+                  </a>
+                </div>
+              </div>
+
+              <div className="support-channel-item">
+                <div className="channel-icon-wrapper website">
+                  <i className="fas fa-globe"></i>
+                </div>
+                <div className="channel-content">
+                  <h4>Website</h4>
+                  <p className="channel-detail">yourwebsite.com</p>
+                  <a href="https://yourwebsite.com" target="_blank" rel="noopener noreferrer" className="channel-action">
+                    Visit Site
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div className="support-note">
+              <p><i className="fas fa-clock"></i> Response time: Usually within 1 hour</p>
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <button className="btn btn-primary" onClick={() => setShowSupportModal(false)}>
+              Got it, thanks!
+            </button>
           </div>
         </div>
-        
-        <div className="support-channel-item">
-          <div className="channel-icon-wrapper telegram">
-            <i className="fab fa-telegram"></i>
-          </div>
-          <div className="channel-content">
-            <h4>Telegram</h4>
-            <p className="channel-detail">@yourchannel</p>
-            <a href="https://t.me/leo6_6_6" target="_blank" rel="noopener noreferrer" className="channel-action">
-              Join Chat
-            </a>
-          </div>
-        </div>
-        
-        <div className="support-channel-item">
-          <div className="channel-icon-wrapper website">
-            <i className="fas fa-globe"></i>
-          </div>
-          <div className="channel-content">
-            <h4>Website</h4>
-            <p className="channel-detail">yourwebsite.com</p>
-            <a href="https://yourwebsite.com" target="_blank" rel="noopener noreferrer" className="channel-action">
-              Visit Site
-            </a>
-          </div>
-        </div>
       </div>
-      
-      <div className="support-note">
-        <p><i className="fas fa-clock"></i> Response time: Usually within 1 hour</p>
-      </div>
-    </div>
-    
-    <div className="modal-actions">
-      <button className="btn btn-primary" onClick={() => setShowSupportModal(false)}>
-        Got it, thanks!
-      </button>
-    </div>
-  </div>
-</div>
     </div>
   );
 };
