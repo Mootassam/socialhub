@@ -14,7 +14,7 @@
   },
 
   "build": {
-    "appId": "com.yourcompany.yourapp",
+    "appId": "com.yourcompany.socialhub",
     "productName": "SocialHub",
 
     "directories": {

@@ -149,6 +149,8 @@ ipcMain.on('new-message-detected', (event, data) => {
   mainWindow.webContents.send('message-detected', data);
 });
 
+
+
 // Configure per-account session partition
 ipcMain.handle('configure-partition', (event, { partition, userAgent }) => {
   try {
@@ -169,6 +171,11 @@ ipcMain.handle('configure-partition', (event, { partition, userAgent }) => {
   } catch (e) {
     return false;
   }
+});
+
+// Get Preload Path safely
+ipcMain.handle('get-preload-path', () => {
+  return path.join(__dirname, 'preload.js');
 });
 
 // Handle multiple windows for floating webviews
@@ -237,14 +244,15 @@ app.whenReady().then(() => {
     }
   }, 3000);
 
-  // Optimize memory and background throttling
+  // Optimize for MAX Performance (User Request)
+  // Disable throttling to ensure background tabs are always ready
+  app.commandLine.appendSwitch('disable-background-timer-throttling');
+  app.commandLine.appendSwitch('disable-renderer-backgrounding');
+  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+  
   app.commandLine.appendSwitch('disable-site-isolation-trials'); // Save memory (trade-off: security)
   app.commandLine.appendSwitch('renderer-process-limit', '100'); // Limit processes
   app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer'); // Performance
-  // Throttle background timers to save CPU
-  app.commandLine.appendSwitch('enable-background-timer-throttling');
-  app.commandLine.appendSwitch('enable-background-occlusion');
-  app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
   createWindow();
 

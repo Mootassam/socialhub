@@ -1,6 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import AccountWebView from './components/AccountWebView';
-import UpdateNotification from './components/UpdateNotification';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
 interface Provider {
@@ -70,6 +69,7 @@ const AccountManager: React.FC = () => {
     25: "https://hangouts.google.com/",
     26: "https://www.textnow.com/login",
     27: "https://messages.textfree.us/login",
+    28: "https://app.slack.com/client",
   };
 
   // State
@@ -106,12 +106,10 @@ const AccountManager: React.FC = () => {
   const [editProviderId, setEditProviderId] = useState<number | null>(null);
   const [editAccountId, setEditAccountId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [backgroundUpdatesEnabled, setBackgroundUpdatesEnabled] = useState<boolean>(() => {
-    try {
-      const v = localStorage.getItem('backgroundUpdatesEnabled');
-      return v ? v === 'true' : false;
-    } catch { return false; }
-  });
+  
+  // PERFORMANCE: Always enabled
+  const backgroundUpdatesEnabled = true;
+
   const [loadedAccountKeys, setLoadedAccountKeys] = useState<string[]>([]);
   const [showContextMenu, setShowContextMenu] = useState<boolean>(false);
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
@@ -119,12 +117,15 @@ const AccountManager: React.FC = () => {
   const [contextProviderId, setContextProviderId] = useState<number | null>(null);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
 
+  // Drag and Drop State
+  const [draggedProviderId, setDraggedProviderId] = useState<number | null>(null);
+
   // Effects
   useEffect(() => {
-    // Simulate initial loading
+    // Fast initial loading
     const timer = setTimeout(() => {
       setIsLoading(false);
-    }, 500);
+    }, 100);
 
     return () => clearTimeout(timer);
   }, []);
@@ -155,12 +156,6 @@ const AccountManager: React.FC = () => {
       localStorage.setItem('accounts', JSON.stringify(accounts));
     } catch { }
   }, [accounts]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('backgroundUpdatesEnabled', String(backgroundUpdatesEnabled));
-    } catch { }
-  }, [backgroundUpdatesEnabled]);
 
   // Request notification permission
   useEffect(() => {
@@ -206,6 +201,26 @@ const AccountManager: React.FC = () => {
     if (!activeProviderId || !activeAccountId) return;
     setLoadedAccountKeys(prev => prev.includes(key) ? prev : [...prev, key]);
   }, [activeProviderId, activeAccountId]);
+
+  // High Performance Mode: Preload ALL accounts to ensure instant switching
+  useEffect(() => {
+    if (backgroundUpdatesEnabled) {
+      // Collect all account keys
+      const allKeys: string[] = [];
+      providers.forEach(p => {
+        const pAccounts = accounts[p.id] || [];
+        pAccounts.forEach(a => {
+           allKeys.push(`${p.id}-${a.id}`);
+        });
+      });
+      
+      setLoadedAccountKeys(prev => {
+        const uniqueKeys = new Set([...prev, ...allKeys]);
+        if (uniqueKeys.size === prev.length) return prev;
+        return Array.from(uniqueKeys);
+      });
+    }
+  }, [providers, accounts, backgroundUpdatesEnabled]);
 
   // Filter providers not yet added and matching search
   const filteredProviders = allProviders.filter(p => {
@@ -288,27 +303,7 @@ const AccountManager: React.FC = () => {
     }
   };
 
-  // NOTIFICATION FUNCTIONS
-  const addNotification = (providerId: number, accountId: number) => {
-    console.log(`Adding notification for provider ${providerId}, account ${accountId}`);
 
-    setAccounts(prev => {
-      const updatedAccounts = { ...prev };
-      const accountList = updatedAccounts[providerId] || [];
-
-      const updatedAccountList = accountList.map(account => {
-        if (account.id === accountId) {
-          const newCount = account.notifications + 1;
-          console.log(`Account ${accountId} notifications: ${newCount}`);
-          return { ...account, notifications: newCount };
-        }
-        return account;
-      });
-
-      updatedAccounts[providerId] = updatedAccountList;
-      return updatedAccounts;
-    });
-  };
 
   // Update unread count directly (from title-based detection)
   const setUnreadCount = (providerId: number, accountId: number, count: number) => {
@@ -414,18 +409,66 @@ const AccountManager: React.FC = () => {
     setProviderSearch('');
   };
 
-  // For testing notifications
+  // Drag and Drop Handlers
+  const handleDragStart = (e: React.DragEvent, providerId: number) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', providerId.toString());
+    // Delay state update to allow drag to start smoothly
+    requestAnimationFrame(() => setDraggedProviderId(providerId));
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent, targetProviderId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Get dragged ID from state or dataTransfer as fallback
+    let sourceId = draggedProviderId;
+    if (sourceId === null) {
+      const data = e.dataTransfer.getData('text/plain');
+      if (data) sourceId = parseInt(data, 10);
+    }
+
+    if (sourceId === null || sourceId === targetProviderId) {
+      setDraggedProviderId(null);
+      return;
+    }
+
+    const draggedIndex = providers.findIndex(p => p.id === sourceId);
+    const targetIndex = providers.findIndex(p => p.id === targetProviderId);
+
+    if (draggedIndex === -1 || targetIndex === -1) {
+      setDraggedProviderId(null);
+      return;
+    }
+
+    const newProviders = [...providers];
+    const [draggedItem] = newProviders.splice(draggedIndex, 1);
+    newProviders.splice(targetIndex, 0, draggedItem);
+
+    setProviders(newProviders);
+    setDraggedProviderId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedProviderId(null);
+  };
 
   // Render pooled webviews: keep all accounts mounted, show/hide instead of remounting
+  const stableProviders = useMemo(() => [...providers].sort((a, b) => a.id - b.id), [providers]);
+
   const renderWebviewsPool = () => {
     return (
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        {providers.map(p => (
+        {stableProviders.map(p => (
           (accounts[p.id] || []).map(a => {
             const k = `${p.id}-${a.id}`;
             const visible = p.id === activeProviderId && a.id === activeAccountId;
             // Lazy load: Only load if visible, OR if it has been loaded before AND background updates are enabled.
-            // This aggressively saves RAM by unloading hidden tabs if background updates are off.
             const hasBeenLoaded = loadedAccountKeys.includes(k);
             const shouldLoad = visible || (backgroundUpdatesEnabled && hasBeenLoaded);
 
@@ -438,7 +481,6 @@ const AccountManager: React.FC = () => {
                 url={url}
                 visible={visible}
                 backgroundUpdatesEnabled={backgroundUpdatesEnabled}
-                onNotification={addNotification}
                 onUnreadChange={setUnreadCount}
               />
             );
@@ -452,28 +494,6 @@ const AccountManager: React.FC = () => {
       </div>
     );
   };
-
-  // Background webviews to keep notifications updated for non-active accounts
-  // const renderBackgroundWebviews = () => {
-  //   return (
-  //     <div style={{ position: 'absolute', left: -99999, top: -99999, width: 1, height: 1, overflow: 'hidden', opacity: 0 }}>
-  //       {providers.map(p => (
-  //         (accounts[p.id] || []).map(a => (
-  //           (p.id === activeProviderId && a.id === activeAccountId) ? null : (
-  //             <AccountWebView
-  //               key={`bg-${p.id}-${a.id}`}
-  //               providerId={p.id}
-  //               accountId={a.id}
-  //               url={providerUrls[p.id]}
-  //               onNotification={addNotification}
-  //               onUnreadChange={setUnreadCount}
-  //             />
-  //           )
-  //         ))
-  //       ))}
-  //     </div>
-  //   );
-  // };
 
   // Render Modals
   const renderSettingsModal = () => (
@@ -490,7 +510,7 @@ const AccountManager: React.FC = () => {
             {providers.map(provider => (
               <div key={provider.id} className="settings-provider-item">
                 <div className="settings-provider-icon" >
-                  <img src={provider.icon} style={{ width: '100%' }} />
+                  <img src={provider.icon} style={{ width: '100%' }} draggable={false} />
                 </div>
                 <div className="settings-provider-info">
                   <div className="settings-provider-name">{provider.name}</div>
@@ -509,20 +529,6 @@ const AccountManager: React.FC = () => {
                 </div>
               </div>
             ))}
-          </div>
-          <div className="settings-row" style={{ marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <div style={{ fontWeight: 600 }}>Background updates</div>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>Keep unread counts updated for non-active accounts</div>
-            </div>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <input
-                type="checkbox"
-                checked={backgroundUpdatesEnabled}
-                onChange={(e) => setBackgroundUpdatesEnabled(e.target.checked)}
-              />
-              <span>{backgroundUpdatesEnabled ? 'On' : 'Off'}</span>
-            </label>
           </div>
         </div>
         <div className="modal-actions">
@@ -546,13 +552,22 @@ const AccountManager: React.FC = () => {
 
         <div className="providers-section">
           {providers.map(provider => (
-            <div key={provider.id} className="provider-icon-wrapper">
+            <div 
+              key={provider.id} 
+              className="provider-icon-wrapper"
+              draggable={true}
+              onDragStart={(e) => handleDragStart(e, provider.id)}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, provider.id)}
+              onDragEnd={handleDragEnd}
+              style={{ opacity: draggedProviderId === provider.id ? 0.5 : 1, cursor: 'grab' }}
+            >
               <div
-                className={`provider-icon ${activeProviderId === provider.id ? 'active' : ''}`}
-                title={provider.name}
-                onClick={() => handleProviderClick(provider.id)}
-              >
-                <img src={provider.icon} style={{ width: '100%' }} />
+                  className={`provider-icon ${activeProviderId === provider.id ? 'active' : ''}`}
+                  title={provider.name}
+                  onClick={() => handleProviderClick(provider.id)}
+                >
+                  <img src={provider.icon} style={{ width: '100%' }} draggable={false} />
                 {provider.notifications > 0 && (
                   <div className="provider-notification">
                     {provider.notifications > 99 ? '99+' : provider.notifications}
@@ -570,8 +585,6 @@ const AccountManager: React.FC = () => {
           <div className="sidebar-icon" title="Settings" onClick={() => setShowSettingsModal(true)}>
             <i className="fa-solid fa-gear"></i>
           </div>
-          {/* Test Notification Button */}
-
         </div>
       </div>
 
@@ -598,12 +611,15 @@ const AccountManager: React.FC = () => {
                   )}
                 </div>
                 <div className="account-name">{account.name}</div>
+               
               </div>
             ))}
             <div className="add-account-btn" onClick={handleAddAccount}>
-              <i className="fas fa-plus"></i>
+              <i className="fa-solid fa-plus"></i> 
             </div>
           </div>
+          
+      
         </div>
 
         {/* Web View Area */}
@@ -616,17 +632,14 @@ const AccountManager: React.FC = () => {
               <span>{currentProvider ? `${currentProvider.name}${currentAccount ? ` • ${currentAccount.name}` : ''}` : 'Select a Provider'}</span>
             </div>
 
-            <div className="webview-controls">
-              <button className="control-btn" title="Refresh" onClick={handleRefresh}>
-                <i className="fas fa-redo"></i>
-              </button>
-              <button className="control-btn" title="Open in new window" onClick={handleOpenInNewWindow}>
-                <i className="fas fa-external-link-alt"></i>
-              </button>
-              <button className="control-btn" title="Fullscreen" onClick={handleFullscreen}>
-                <i className="fas fa-expand"></i>
-              </button>
-            </div>
+              <div className="webview-header-controls" style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 10 }}>
+             
+             <div className="window-controls" style={{ display: 'flex', gap: 8 }}>
+               <i className="fa-solid fa-expand" onClick={handleFullscreen} title="Fullscreen" style={{ cursor: 'pointer', padding: 5 }}></i>
+               <i className="fa-solid fa-external-link-alt" onClick={handleOpenInNewWindow} title="Open in Browser" style={{ cursor: 'pointer', padding: 5 }}></i>
+               <i className="fa-solid fa-sync-alt" onClick={handleRefresh} title="Refresh" style={{ cursor: 'pointer', padding: 5 }}></i>
+             </div>
+          </div>
           </div>
 
           <div className="webview-container">
@@ -634,6 +647,9 @@ const AccountManager: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Settings Modal */}
+      {renderSettingsModal()}
 
       {/* Edit Account Modal */}
       <div className={`modal ${showEditAccountModal ? 'active' : ''}`} onClick={() => setShowEditAccountModal(false)}>
@@ -682,37 +698,31 @@ const AccountManager: React.FC = () => {
           >
             <div
               className="context-menu-item"
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => {
                 if (contextProviderId && contextAccountId) {
                   openEditAccount(contextProviderId, contextAccountId);
                 }
                 setShowContextMenu(false);
               }}
             >
-              <i className="fas fa-pen"></i>
-              <span>Edit Account</span>
+              <i className="fas fa-edit"></i> Edit Name
             </div>
-            <div className="context-menu-divider"></div>
             <div
               className="context-menu-item delete"
-              onClick={(e) => {
-                e.stopPropagation();
+              onClick={() => {
                 if (contextProviderId && contextAccountId) {
                   deleteAccountDirect(contextProviderId, contextAccountId);
                 }
                 setShowContextMenu(false);
               }}
             >
-              <i className="fas fa-trash"></i>
-              <span>Delete Account</span>
+              <i className="fas fa-trash"></i> Delete Account
             </div>
           </div>
         </>
       )}
 
-      {/* Modals */}
-      {/* Add Provider */}
+      {/* Add Provider Modal */}
       <div className={`modal ${showAddProviderModal ? 'active' : ''}`} onClick={() => setShowAddProviderModal(false)}>
         <div className="modal-content" onClick={e => e.stopPropagation()}>
           <div className="modal-header">
@@ -722,111 +732,59 @@ const AccountManager: React.FC = () => {
             </div>
           </div>
           <div className="modal-body">
-            <div className="search-container">
-              <i className="fas fa-search search-icon"></i>
+            <div className="input-group">
               <input
                 type="text"
-                className="search-input"
-                placeholder="Search providers..."
+                className="modal-input"
+                placeholder="Search services..."
                 value={providerSearch}
                 onChange={(e) => setProviderSearch(e.target.value)}
+                autoFocus
               />
             </div>
-            <div className="providers-grid">
-              {filteredProviders.map(p => (
-                <div key={p.id} className="provider-grid-item" onClick={() => handleAddProvider(p)}>
-                  <div className="provider-grid-icon" >
-                    <img src={p.icon} style={{ width: '100%' }} />
+            <div className="provider-grid">
+              {filteredProviders.map(provider => (
+                <div key={provider.id} className="provider-card" onClick={() => handleAddProvider(provider)}>
+                  <div className="provider-card-icon">
+                    <img src={provider.icon} style={{ width: '100%' }} />
                   </div>
-                  <div className="provider-grid-name">{p.name}</div>
+                  <div className="provider-card-name">{provider.name}</div>
                 </div>
               ))}
               {filteredProviders.length === 0 && (
-                <div style={{ padding: '14px', color: 'var(--text-secondary)' }}>No providers available to add.</div>
+                <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 20, color: '#666' }}>
+                  No providers found
+                </div>
               )}
             </div>
           </div>
-          <div className="modal-actions">
-            <button className="btn btn-primary" onClick={() => setShowAddProviderModal(false)}>Close</button>
-          </div>
         </div>
       </div>
-      {renderSettingsModal()}
 
-      {/* Customer Support Modal */}
-      {/* Customer Support Modal - Simplified One Line */}
-      <div className={`modal ${showSupportModal ? 'active' : ''}`} onClick={() => setShowSupportModal(false)}>
-        <div className="modal-content support-modal" onClick={e => e.stopPropagation()}>
-          <div className="modal-header">
-            <div className="modal-title">
-              <i className="fas fa-headset" style={{ marginRight: '10px', color: '#5d5fef' }}></i>
-              Customer Support
-            </div>
-            <div className="modal-close" onClick={() => setShowSupportModal(false)}>
-              <i className="fas fa-times"></i>
-            </div>
-          </div>
-
-          <div className="modal-body support-body">
-            <div className="support-intro">
-              <h3>Need Help?</h3>
-              <p>Contact our support team through any of the channels below</p>
-            </div>
-
-            <div className="support-channels-single-line">
-              <div className="support-channel-item">
-                <div className="channel-icon-wrapper email">
-                  <i className="fas fa-envelope"></i>
+      {/* Support Modal */}
+      {showSupportModal && (
+        <div className={`modal active`} onClick={() => setShowSupportModal(false)}>
+           <div className="modal-content simple-modal" onClick={e => e.stopPropagation()}>
+             <div className="modal-header">
+               <div className="modal-title">About SocialHub</div>
+               <div className="modal-close" onClick={() => setShowSupportModal(false)}>
+                 <i className="fas fa-times"></i>
+               </div>
+             </div>
+             <div className="modal-body" style={{ textAlign: 'center' }}>
+                <div style={{ marginBottom: 15 }}>
+                  <img src="./icons/icon.png" style={{ width: 64, height: 64 }} />
                 </div>
-                <div className="channel-content">
-                  <h4>Email</h4>
-                  <p className="channel-detail">support@yourapp.com</p>
-                  <a href="mailto:support@yourapp.com" className="channel-action">
-                    Email us
-                  </a>
-                </div>
-              </div>
-
-              <div className="support-channel-item">
-                <div className="channel-icon-wrapper telegram">
-                  <i className="fab fa-telegram"></i>
-                </div>
-                <div className="channel-content">
-                  <h4>Telegram</h4>
-                  <p className="channel-detail">@yourchannel</p>
-                  <a href="https://t.me/leo6_6_6" target="_blank" rel="noopener noreferrer" className="channel-action">
-                    Join Chat
-                  </a>
-                </div>
-              </div>
-
-              <div className="support-channel-item">
-                <div className="channel-icon-wrapper website">
-                  <i className="fas fa-globe"></i>
-                </div>
-                <div className="channel-content">
-                  <h4>Website</h4>
-                  <p className="channel-detail">yourwebsite.com</p>
-                  <a href="https://yourwebsite.com" target="_blank" rel="noopener noreferrer" className="channel-action">
-                    Visit Site
-                  </a>
-                </div>
-              </div>
-            </div>
-
-            <div className="support-note">
-              <p><i className="fas fa-clock"></i> Response time: Usually within 1 hour</p>
-            </div>
-          </div>
-
-          <div className="modal-actions">
-            <button className="btn btn-primary" onClick={() => setShowSupportModal(false)}>
-              Got it, thanks!
-            </button>
-          </div>
+                <h3>SocialHub Messenger</h3>
+                <p>Version 1.0.0</p>
+                <p style={{ marginTop: 10, color: '#666' }}>All-in-one messenger for your desktop.</p>
+             </div>
+             <div className="modal-footer">
+               <button className="btn btn-primary" onClick={() => setShowSupportModal(false)}>Close</button>
+             </div>
+           </div>
         </div>
-      </div>
-      <UpdateNotification />
+      )}
     </div>
   );
 };

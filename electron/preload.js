@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  getPreloadPath: () => ipcRenderer.invoke('get-preload-path'),
   configurePartition: (partition, options = {}) => {
     try {
       const { userAgent } = options || {};
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onDownloadProgress: (callback) => ipcRenderer.on('download-progress', (_event, value) => callback(value)),
   onUpdateDownloaded: (callback) => ipcRenderer.on('update-downloaded', (_event, value) => callback(value)),
   onUpdateError: (callback) => ipcRenderer.on('update-error', (_event, value) => callback(value)),
+  translateText: (text, sourceLang, targetLang) => ipcRenderer.invoke('translate-text', { text, sourceLang, targetLang }),
 });
 
 // Listen for messages from webview content
