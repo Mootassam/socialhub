@@ -618,6 +618,7 @@
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
+  margin-top: 22px;
 }
 
 @media (max-width: 768px) {
@@ -630,6 +631,12 @@
   .providers-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4 , 1fr);
+  gap:5px;
 }
 
 .provider-grid-item {
@@ -701,7 +708,7 @@
   font-size: 18px;
   color: white;
   margin-right: 14px;
-  flex-shrink: 0;
+  object-fit: contain;
 }
 
 .settings-provider-info {

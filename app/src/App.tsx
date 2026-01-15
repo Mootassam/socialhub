@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import AccountWebView from './components/AccountWebView';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
@@ -120,6 +120,8 @@ const AccountManager: React.FC = () => {
   // Drag and Drop State
   const [draggedProviderId, setDraggedProviderId] = useState<number | null>(null);
 
+  const prevAccountsRef = useRef<Record<number, Account[]>>({});
+
   // Effects
   useEffect(() => {
     // Fast initial loading
@@ -194,6 +196,32 @@ const AccountManager: React.FC = () => {
       return { ...provider, notifications: totalNotifications };
     }));
   }, [accounts]);
+
+  useEffect(() => {
+    const prev = prevAccountsRef.current;
+    Object.keys(accounts).forEach(key => {
+      const providerId = Number(key);
+      const newAccounts = accounts[providerId] || [];
+      const prevAccounts = prev[providerId] || [];
+      const prevMap = new Map(prevAccounts.map(a => [a.id, a.notifications]));
+      newAccounts.forEach(account => {
+        const prevCount = prevMap.get(account.id) ?? 0;
+        if (account.notifications > prevCount && account.notifications > 0) {
+          const provider = providers.find(p => p.id === providerId);
+          const title = provider ? `${provider.name} • ${account.name}` : account.name;
+          const body =
+            account.notifications === 1
+              ? 'You have 1 unread message'
+              : `You have ${account.notifications} unread messages`;
+          const api = (window as any).electronAPI;
+          if (api && typeof api.showNotification === 'function') {
+            api.showNotification(title, body);
+          }
+        }
+      });
+    });
+    prevAccountsRef.current = accounts;
+  }, [accounts, providers]);
 
   // Mark active account as loaded so it stays warm for future switches
   useEffect(() => {
@@ -540,6 +568,21 @@ const AccountManager: React.FC = () => {
     </div>
   );
 
+  const handleResetApp = async () => {
+    if (confirm('Are you sure you want to reset the app? This will delete all accounts, settings, and sessions (Factory Reset).')) {
+      // Clear localStorage
+      localStorage.clear();
+      
+      // Clear Electron sessions
+      if ((window as any).electronAPI?.clearAllData) {
+        await (window as any).electronAPI.clearAllData();
+      }
+
+      // Reload
+      window.location.reload();
+    }
+  };
+
   return (
     <div className="account-manager">
       {/* Sidebar */}
@@ -584,6 +627,9 @@ const AccountManager: React.FC = () => {
           </div>
           <div className="sidebar-icon" title="Settings" onClick={() => setShowSettingsModal(true)}>
             <i className="fa-solid fa-gear"></i>
+          </div>
+          <div className="sidebar-icon" title="Factory Reset" onClick={handleResetApp} style={{ color: '#ef4444' }}>
+            <i className="fa-solid fa-trash"></i>
           </div>
         </div>
       </div>
@@ -742,13 +788,13 @@ const AccountManager: React.FC = () => {
                 autoFocus
               />
             </div>
-            <div className="provider-grid">
+            <div className="providers-grid">
               {filteredProviders.map(provider => (
-                <div key={provider.id} className="provider-card" onClick={() => handleAddProvider(provider)}>
-                  <div className="provider-card-icon">
+                <div key={provider.id} className="provider-grid-item" onClick={() => handleAddProvider(provider)}>
+                  <div className="provider-grid-icon">
                     <img src={provider.icon} style={{ width: '100%' }} />
                   </div>
-                  <div className="provider-card-name">{provider.name}</div>
+                  <div className="provider-grid-name">{provider.name}</div>
                 </div>
               ))}
               {filteredProviders.length === 0 && (

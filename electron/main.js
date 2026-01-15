@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeTheme, session, Notification, net } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
+const fs = require('fs');
 const isDev = process.env.NODE_ENV === 'development';
 
 // Configure Auto Updater
@@ -178,6 +179,37 @@ ipcMain.handle('get-preload-path', () => {
   return path.join(__dirname, 'preload.js');
 });
 
+// Clear all data (Factory Reset)
+ipcMain.handle('clear-all-data', async () => {
+  try {
+    // Clear default session
+    await session.defaultSession.clearStorageData();
+    await session.defaultSession.clearCache();
+
+    // Clear webviews partition (if any generic one exists)
+    const webviewSession = session.fromPartition('persist:webviews');
+    await webviewSession.clearStorageData();
+    await webviewSession.clearCache();
+
+    // Nuke all custom partitions on disk
+    const partitionsPath = path.join(app.getPath('userData'), 'Partitions');
+    if (fs.existsSync(partitionsPath)) {
+       try {
+         // We might need to close windows or ensure sessions are released, but often rmSync works if we don't mind errors on locked files
+         // However, since we are about to reload/restart, it's fine.
+         fs.rmSync(partitionsPath, { recursive: true, force: true });
+       } catch (e) {
+         console.error('Failed to delete partitions folder:', e);
+       }
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Failed to clear data:', error);
+    return false;
+  }
+});
+
 // Handle multiple windows for floating webviews
 ipcMain.handle('create-floating-window', (event, { url, title, width, height }) => {
   const floatingWindow = new BrowserWindow({
@@ -214,7 +246,7 @@ ipcMain.handle('quit-and-install-update', () => {
 
 app.whenReady().then(() => {
   // Ensure Windows notifications work
-  try { app.setAppUserModelId('com.yourcompany.yourapp'); } catch { }
+  try { app.setAppUserModelId('com.yourcompany.socialhub'); } catch { }
 
   // Auto Updater Events
   autoUpdater.on('update-available', (info) => {

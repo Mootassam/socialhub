@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sendNotification: (providerId, accountId) => {
     ipcRenderer.send('new-notification', { providerId, accountId });
   },
+  showNotification: (title, body) => ipcRenderer.invoke('show-notification', { title, body }),
   // Auto Updater API
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   startDownloadUpdate: () => ipcRenderer.invoke('start-download-update'),
@@ -24,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateDownloaded: (callback) => ipcRenderer.on('update-downloaded', (_event, value) => callback(value)),
   onUpdateError: (callback) => ipcRenderer.on('update-error', (_event, value) => callback(value)),
   translateText: (text, sourceLang, targetLang) => ipcRenderer.invoke('translate-text', { text, sourceLang, targetLang }),
+  clearAllData: () => ipcRenderer.invoke('clear-all-data'),
 });
 
 // Listen for messages from webview content
