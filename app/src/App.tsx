@@ -8,6 +8,7 @@ interface Provider {
   icon: string;
   color: string;
   notifications: number;
+  muted?: boolean;
 }
 
 interface Account {
@@ -15,6 +16,7 @@ interface Account {
   name: string;
   notifications: number;
   color: string;
+  muted?: boolean;
 }
 
 const AccountManager: React.FC = () => {
@@ -74,26 +76,26 @@ const AccountManager: React.FC = () => {
 
   // State
   const [providers, setProviders] = useState<Provider[]>([
-    { id: 1, name: "WhatsApp", icon: "./provider/whatsapp.png", color: "#25d366", notifications: 0 },
+    { id: 1, name: "WhatsApp", icon: "./provider/whatsapp.png", color: "#25d366", notifications: 0, muted: false },
   ]);
 
   const [accounts, setAccounts] = useState<Record<number, Account[]>>({
     1: [
-      { id: 101, name: "Account 1", notifications: 0, color: "#25d366" },
-      { id: 102, name: "Account 2", notifications: 0, color: "#25d366" },
-      { id: 103, name: "Account 3", notifications: 0, color: "#25d366" },
-      { id: 104, name: "Account 4", notifications: 0, color: "#25d366" },
-      { id: 105, name: "Account 5", notifications: 0, color: "#25d366" },
-      { id: 106, name: "Account 6", notifications: 0, color: "#25d366" }
+      { id: 101, name: "Account 1", notifications: 0, color: "#25d366", muted: false },
+      { id: 102, name: "Account 2", notifications: 0, color: "#25d366", muted: false },
+      { id: 103, name: "Account 3", notifications: 0, color: "#25d366", muted: false },
+      { id: 104, name: "Account 4", notifications: 0, color: "#25d366", muted: false },
+      { id: 105, name: "Account 5", notifications: 0, color: "#25d366", muted: false },
+      { id: 106, name: "Account 6", notifications: 0, color: "#25d366", muted: false }
     ],
-    2: [{ id: 201, name: "Account 1", notifications: 0, color: "#0088cc" }],
-    3: [{ id: 301, name: "Account 1", notifications: 0, color: "#00b900" }],
-    4: [{ id: 401, name: "Account 1", notifications: 0, color: "#e4405f" }],
-    8: [{ id: 801, name: "Account 1", notifications: 0, color: "#5865f2" }],
-    17: [{ id: 1701, name: "Account 1", notifications: 0, color: "#4c75a3" }],
-    19: [{ id: 1901, name: "Account 1", notifications: 0, color: "#5d5fef" }],
-    20: [{ id: 2001, name: "Account 1", notifications: 0, color: "#10a37f" }],
-    21: [{ id: 2101, name: "Account 1", notifications: 0, color: "#0b57d0" }],
+    2: [{ id: 201, name: "Account 1", notifications: 0, color: "#0088cc", muted: false }],
+    3: [{ id: 301, name: "Account 1", notifications: 0, color: "#00b900", muted: false }],
+    4: [{ id: 401, name: "Account 1", notifications: 0, color: "#e4405f", muted: false }],
+    8: [{ id: 801, name: "Account 1", notifications: 0, color: "#5865f2", muted: false }],
+    17: [{ id: 1701, name: "Account 1", notifications: 0, color: "#4c75a3", muted: false }],
+    19: [{ id: 1901, name: "Account 1", notifications: 0, color: "#5d5fef", muted: false }],
+    20: [{ id: 2001, name: "Account 1", notifications: 0, color: "#10a37f", muted: false }],
+    21: [{ id: 2101, name: "Account 1", notifications: 0, color: "#0b57d0", muted: false }],
   });
 
   const [activeProviderId, setActiveProviderId] = useState<number>(1);
@@ -138,10 +140,17 @@ const AccountManager: React.FC = () => {
       const savedProviders = localStorage.getItem('providers');
       const savedAccounts = localStorage.getItem('accounts');
       if (savedProviders) {
-        setProviders(JSON.parse(savedProviders));
+        const parsed: Provider[] = JSON.parse(savedProviders);
+        setProviders(parsed.map(p => ({ ...p, muted: p.muted ?? false })));
       }
       if (savedAccounts) {
-        setAccounts(JSON.parse(savedAccounts));
+        const parsed: Record<number, Account[]> = JSON.parse(savedAccounts);
+        const withMute: Record<number, Account[]> = {};
+        Object.keys(parsed).forEach(key => {
+          const pid = Number(key);
+          withMute[pid] = (parsed[pid] || []).map(a => ({ ...a, muted: a.muted ?? false }));
+        });
+        setAccounts(withMute);
       }
     } catch { }
   }, []);
@@ -158,18 +167,6 @@ const AccountManager: React.FC = () => {
       localStorage.setItem('accounts', JSON.stringify(accounts));
     } catch { }
   }, [accounts]);
-
-  // Request notification permission
-  useEffect(() => {
-    if (!('Notification' in window)) {
-      console.log('This browser does not support notifications');
-      return;
-    }
-
-    if (Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
 
   // Close context menu on escape key
   useEffect(() => {
@@ -208,6 +205,12 @@ const AccountManager: React.FC = () => {
         const prevCount = prevMap.get(account.id) ?? 0;
         if (account.notifications > prevCount && account.notifications > 0) {
           const provider = providers.find(p => p.id === providerId);
+          if (provider && provider.muted) {
+            return;
+          }
+          if (account.muted) {
+            return;
+          }
           const title = provider ? `${provider.name} • ${account.name}` : account.name;
           const body =
             account.notifications === 1
@@ -270,10 +273,46 @@ const AccountManager: React.FC = () => {
     }
   };
 
+  const toggleProviderMute = (providerId: number) => {
+    const current = providers.find(p => p.id === providerId);
+    const nextMuted = current ? !current.muted : true;
+
+    setProviders(prev =>
+      prev.map(provider =>
+        provider.id === providerId ? { ...provider, muted: nextMuted } : provider
+      )
+    );
+
+    if (nextMuted) {
+      setAccounts(prev => ({
+        ...prev,
+        [providerId]: (prev[providerId] || []).map(account => ({
+          ...account,
+          notifications: 0
+        }))
+      }));
+    }
+  };
+
   const handleAccountClick = (accountId: number) => {
     setActiveAccountId(accountId);
     // Clear notifications when user clicks on the account
     clearAccountNotifications(activeProviderId, accountId);
+  };
+
+  const toggleAccountMute = (providerId: number, accountId: number) => {
+    const currentList = accounts[providerId] || [];
+    const current = currentList.find(a => a.id === accountId);
+    const nextMuted = current ? !current.muted : true;
+
+    setAccounts(prev => ({
+      ...prev,
+      [providerId]: (prev[providerId] || []).map(account =>
+        account.id === accountId
+          ? { ...account, muted: nextMuted, notifications: nextMuted ? 0 : account.notifications }
+          : account
+      )
+    }));
   };
 
   const handleAccountContextMenu = (e: React.MouseEvent, providerId: number, accountId: number, accountName: string) => {
@@ -335,11 +374,17 @@ const AccountManager: React.FC = () => {
 
   // Update unread count directly (from title-based detection)
   const setUnreadCount = (providerId: number, accountId: number, count: number) => {
+    const provider = providers.find(p => p.id === providerId);
+    const providerMuted = provider?.muted;
+
     setAccounts(prev => ({
       ...prev,
-      [providerId]: (prev[providerId] || []).map(account =>
-        account.id === accountId ? { ...account, notifications: count } : account
-      )
+      [providerId]: (prev[providerId] || []).map(account => {
+        if (account.id !== accountId) return account;
+        const accountMuted = account.muted;
+        const effectiveCount = providerMuted || accountMuted ? 0 : count;
+        return { ...account, notifications: effectiveCount };
+      })
     }));
   };
 
@@ -410,7 +455,8 @@ const AccountManager: React.FC = () => {
       id: nextIdBase,
       name: `Account ${accounts[activeProviderId]?.length ? accounts[activeProviderId].length + 1 : 1}`,
       notifications: 0,
-      color: currentProvider.color
+      color: currentProvider.color,
+      muted: false
     };
     setAccounts(prev => ({
       ...prev,
@@ -424,12 +470,12 @@ const AccountManager: React.FC = () => {
       alert(`${provider.name} is already added.`);
       return;
     }
-    const newProvider: Provider = { ...provider, notifications: 0 };
+    const newProvider: Provider = { ...provider, notifications: 0, muted: false };
     setProviders(prev => [...prev, newProvider]);
     // Add default account
     setAccounts(prev => ({
       ...prev,
-      [provider.id]: [{ id: provider.id * 100 + 1, name: 'Account 1', notifications: 0, color: provider.color }]
+      [provider.id]: [{ id: provider.id * 100 + 1, name: 'Account 1', notifications: 0, color: provider.color, muted: false }]
     }));
     setActiveProviderId(provider.id);
     setActiveAccountId(provider.id * 100 + 1);
@@ -501,6 +547,7 @@ const AccountManager: React.FC = () => {
             const shouldLoad = visible || (backgroundUpdatesEnabled && hasBeenLoaded);
 
             const url = shouldLoad ? (providerUrls[p.id] || 'about:blank') : 'about:blank';
+            const isMuted = !!p.muted || !!a.muted;
             return (
               <AccountWebView
                 key={`pool-${p.id}-${a.id}`}
@@ -510,6 +557,7 @@ const AccountManager: React.FC = () => {
                 visible={visible}
                 backgroundUpdatesEnabled={backgroundUpdatesEnabled}
                 onUnreadChange={setUnreadCount}
+                muted={isMuted}
               />
             );
           })
@@ -548,6 +596,13 @@ const AccountManager: React.FC = () => {
                   </div>
                 </div>
                 <div className="settings-provider-actions">
+                  <div
+                    className="action-btn edit"
+                    title={provider.muted ? 'Unmute Provider' : 'Mute Provider'}
+                    onClick={() => toggleProviderMute(provider.id)}
+                  >
+                    <i className={provider.muted ? 'fas fa-bell' : 'fas fa-bell-slash'}></i>
+                  </div>
                   <div className="action-btn remove"
                     title="Remove Provider"
                     onClick={() => handleRemoveProvider(provider.id)}
@@ -611,6 +666,11 @@ const AccountManager: React.FC = () => {
                   onClick={() => handleProviderClick(provider.id)}
                 >
                   <img src={provider.icon} style={{ width: '100%' }} draggable={false} />
+                {provider.muted && (
+                  <div className="provider-mute-indicator">
+                    <i className="fa-solid fa-bell-slash"></i>
+                  </div>
+                )}
                 {provider.notifications > 0 && (
                   <div className="provider-notification">
                     {provider.notifications > 99 ? '99+' : provider.notifications}
@@ -638,7 +698,7 @@ const AccountManager: React.FC = () => {
       <div className="main-content">
         {/* Top Bar */}
         <div className="top-bar">
-          <div className="accounts-scroll">
+            <div className="accounts-scroll">
             {accounts[activeProviderId]?.map(account => (
               <div
                 key={account.id}
@@ -650,6 +710,11 @@ const AccountManager: React.FC = () => {
               >
                 <div className="account-icon">
                   <img src={currentProvider?.icon} style={{ width: "100%" }} />
+                  {account.muted && (
+                    <div className="account-mute-indicator">
+                      <i className="fa-solid fa-bell-slash"></i>
+                    </div>
+                  )}
                   {account.notifications > 0 && (
                     <div className="account-notification">
                       {account.notifications > 99 ? '99+' : account.notifications}
@@ -753,6 +818,29 @@ const AccountManager: React.FC = () => {
             >
               <i className="fas fa-edit"></i> Edit Name
             </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                if (contextProviderId && contextAccountId) {
+                  toggleAccountMute(contextProviderId, contextAccountId);
+                }
+                setShowContextMenu(false);
+              }}
+            >
+              <i className="fas fa-bell-slash"></i> {accounts[contextProviderId || 0]?.find(a => a.id === contextAccountId)?.muted ? 'Unmute Account' : 'Mute Account'}
+            </div>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                if (contextProviderId) {
+                  toggleProviderMute(contextProviderId);
+                }
+                setShowContextMenu(false);
+              }}
+            >
+              <i className="fas fa-bell"></i> {providers.find(p => p.id === contextProviderId)?.muted ? 'Unmute Provider' : 'Mute Provider'}
+            </div>
+            <div className="context-menu-divider"></div>
             <div
               className="context-menu-item delete"
               onClick={() => {

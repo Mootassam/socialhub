@@ -34,3 +34,30 @@ window.addEventListener('message', (event) => {
     ipcRenderer.send('new-message-detected', event.data);
   }
 });
+
+// Disable native web notifications inside embedded services (webviews)
+try {
+  const DisabledNotification = function () {
+    return undefined;
+  };
+  DisabledNotification.requestPermission = function (callback) {
+    const p = Promise.resolve('denied');
+    if (typeof callback === 'function') {
+      p.then(callback);
+    }
+    return p;
+  };
+  DisabledNotification.permission = 'denied';
+
+  Object.defineProperty(window, 'Notification', {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return DisabledNotification;
+    },
+    set() {
+      // ignore any attempts to overwrite
+    }
+  });
+} catch (e) {
+}

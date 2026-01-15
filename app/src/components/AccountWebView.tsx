@@ -7,6 +7,7 @@ type AccountWebViewProps = {
   onUnreadChange?: (providerId: number, accountId: number, count: number) => void;
   visible?: boolean;
   backgroundUpdatesEnabled?: boolean;
+  muted?: boolean;
 };
 
 // Minimal typing for the Electron <webview> element
@@ -18,6 +19,7 @@ interface ElectronWebviewTag extends HTMLElement {
   removeEventListener: (name: string, cb: (...args: any[]) => void) => void;
   executeJavaScript: (code: string, userGesture?: boolean) => Promise<any>;
   openDevTools: () => void;
+  setAudioMuted?: (muted: boolean) => void;
 }
 
 export default function AccountWebView({ 
@@ -25,9 +27,9 @@ export default function AccountWebView({
   accountId, 
   url,
   onUnreadChange,
-
   visible = true,
-  backgroundUpdatesEnabled = true
+  backgroundUpdatesEnabled = true,
+  muted = false
 }: AccountWebViewProps) {
   const webviewRef = useRef<ElectronWebviewTag | null>(null);
 
@@ -44,11 +46,17 @@ export default function AccountWebView({
   // Store latest props in refs to avoid stale closures in interval
   const onUnreadChangeRef = useRef(onUnreadChange);
   const visibleRef = useRef(visible);
+  const mutedRef = useRef(muted);
+  const isDomReadyRef = useRef(false);
   
   useEffect(() => {
     onUnreadChangeRef.current = onUnreadChange;
     visibleRef.current = visible;
   }, [onUnreadChange, visible]);
+
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
 
   useEffect(() => {
     // Fetch preload path safely
@@ -406,6 +414,7 @@ export default function AccountWebView({
     runCheck();
 
     const handleDomReady = async () => {
+      isDomReadyRef.current = true;
 
       // Inject custom CSS/JS if needed
       // wv.insertCSS(...)
@@ -413,6 +422,10 @@ export default function AccountWebView({
       // Configure session
       if ((window as any).electronAPI?.configurePartition) {
          await (window as any).electronAPI.configurePartition(partition, userAgent);
+      }
+
+      if (typeof wv.setAudioMuted === 'function') {
+        wv.setAudioMuted(!!mutedRef.current);
       }
     };
 
@@ -435,8 +448,16 @@ export default function AccountWebView({
         wv.removeEventListener('dom-ready', handleDomReady);
         wv.removeEventListener('new-window', handleNewWindow);
       }
+      isDomReadyRef.current = false;
     };
   }, [providerId, accountId, partition, url]);
+
+  useEffect(() => {
+    const wv = webviewRef.current;
+    if (!wv || typeof wv.setAudioMuted !== 'function') return;
+    if (!isDomReadyRef.current) return;
+    wv.setAudioMuted(!!muted);
+  }, [muted]);
 
   // Manage visibility manually to keep state alive
   useEffect(() => {

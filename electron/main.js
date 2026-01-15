@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, Tray, shell, ipcMain, nativeTheme, session, No
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const isDev = process.env.NODE_ENV === 'development';
 
 // Configure Auto Updater
@@ -14,6 +15,8 @@ app.commandLine.appendSwitch('disable-smooth-scrolling'); // Save CPU
 app.commandLine.appendSwitch('wm-window-animations-disabled'); // Save GPU
 // app.commandLine.appendSwitch('disable-gpu-compositing'); // Too aggressive, might flicker
 // app.commandLine.appendSwitch('disable-gpu'); // Too aggressive
+// Disable Chromium's own web notifications; SocialHub uses Electron Notification instead
+app.commandLine.appendSwitch('disable-notifications');
 
 let mainWindow;
 let tray = null;
@@ -159,11 +162,10 @@ ipcMain.handle('configure-partition', (event, { partition, userAgent }) => {
     if (userAgent) {
       sess.setUserAgent(userAgent);
     }
-    // Auto-allow common web permissions (notifications, media)
+    // Auto-allow common web permissions (media, camera, etc.)
     sess.setPermissionRequestHandler((webContents, permission, callback, details) => {
-      const allowAll = ['notifications', 'media', 'camera', 'microphone', 'fullscreen', 'pointerLock'];
-      if (allowAll.includes(permission)) {
-        callback(true);
+      if (permission === 'notifications') {
+        callback(false);
         return;
       }
       callback(true);
@@ -174,9 +176,14 @@ ipcMain.handle('configure-partition', (event, { partition, userAgent }) => {
   }
 });
 
-// Get Preload Path safely
+// Get Preload Path safely (as file:// URL for webview preload attribute)
 ipcMain.handle('get-preload-path', () => {
-  return path.join(__dirname, 'preload.js');
+  const preloadPath = path.join(__dirname, 'preload.js');
+  try {
+    return pathToFileURL(preloadPath).toString();
+  } catch {
+    return `file://${preloadPath.replace(/\\/g, '/')}`;
+  }
 });
 
 // Clear all data (Factory Reset)
