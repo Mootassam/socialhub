@@ -145,8 +145,8 @@
 
 .provider-icon-wrapper {
   position: relative;
-  width: 35px;
-  height: 35px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -340,8 +340,8 @@
 
 /* Account icon - Reduced size */
 .account-icon {
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
   border-radius: 14px;
   display: flex;
   align-items: center;
@@ -406,8 +406,8 @@
 
 /* Add account button - Smaller */
 .add-account-btn {
-  width: 52px;
-  height: 52px;
+  width: 45px;
+  height: 40px;
   background: var(--bg-secondary);
   border: 2px dashed var(--border-medium);
   border-radius: 14px;
@@ -447,6 +447,7 @@
   align-items: center;
   justify-content: space-between;
   min-height: 50px;
+  display: none;
 }
 
 .webview-title {
@@ -876,14 +877,14 @@
   }
 
   .account-icon {
-    width: 40px;
-    height: 40px;
+    width: 30px;
+    height: 30px;
     font-size: 20px;
   }
 
   .add-account-btn {
-    width: 48px;
-    height: 48px;
+    width: 45px;
+    height: 40px;
   }
 }
 
