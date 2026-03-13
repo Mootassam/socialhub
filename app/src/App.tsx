@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import AccountWebView from './components/AccountWebView';
+import UpdateNotification from './components/UpdateNotification';
+import { ALL_PROVIDERS, getProviderUrl, isBackgroundPollEnabled } from './data/providers';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface Provider {
   id: number;
   name: string;
@@ -17,630 +20,546 @@ interface Account {
   notifications: number;
   color: string;
   muted?: boolean;
+  lastMessage?: string | null;
 }
 
+type AccountMap = Record<number, Account[]>;
+
+// ─── Constants (outside component — never recreated) ──────────────────────────
+const WARM_LIMIT = 4; // how many inactive webviews to keep alive (LRU)
+
+// Unique user-agent for Telegram multi-account (avoids session collision detection)
+function getTelegramUserAgent(accountId: number): string {
+  const offset = accountId % 50;
+  const major  = 120 + Math.floor(offset / 10);
+  const minor  = offset % 10;
+  return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}${minor}.0.0.0 Safari/537.36`;
+}
+
+// ─── AccountManager ────────────────────────────────────────────────────────────
 const AccountManager: React.FC = () => {
-  // Initial data
-  const allProviders: Array<Pick<Provider, 'id' | 'name' | 'icon' | 'color'>> = [
-    { id: 1, name: 'WhatsApp', icon: './provider/whatsapp.png', color: '#25d366' },
-    { id: 2, name: 'Telegram', icon: './provider/telegram.png', color: '#0088cc' },
-    { id: 3, name: 'Line', icon: './provider/line.png', color: '#00b900' },
-    { id: 4, name: 'Instagram', icon: './provider/instagram.png', color: '#e4405f' },
-    { id: 5, name: 'Messenger', icon: './provider/facebook-messenger.png', color: '#00B2FF' },
-    { id: 6, name: 'Facebook', icon: './provider/facebook.png', color: '#1877f2' },
-    { id: 8, name: 'Discord', icon: './provider/discord.png', color: '#5865f2' },
-    { id: 10, name: 'TikTok', icon: './provider/tiktok.png', color: '#000000' },
-    { id: 12, name: 'Teams', icon: './provider/business.png', color: '#6264a7' },
-    { id: 13, name: 'Tinder', icon: './provider/tinder.png', color: '#e24670' },
-    { id: 14, name: 'Snapchat', icon: './provider/snapchat.png', color: '#fffc00' },
-    { id: 15, name: 'LinkedIn', icon: './provider/linkedin.png', color: '#0a66c2' },
-    { id: 16, name: 'Gmail', icon: './provider/gmail.png', color: '#ea4335' },
-    { id: 17, name: 'VK', icon: './provider/vk.png', color: '#4c75a3' },
-    { id: 19, name: 'DeepSeek', icon: './provider/deepseek.svg', color: '#5d5fef' },
-    { id: 20, name: 'ChatGPT', icon: './provider/chatgpt.png', color: '#10a37f' },
-    { id: 21, name: 'Google Sheets', icon: './provider/google-sheets.png', color: '#0b57d0' },
-    { id: 22, name: 'Google Voice', icon: './provider/Google_Voice.png', color: '#0b57d0' },
-    { id: 23, name: 'X (Twitter)', icon: './provider/twitter.png', color: '#000000' },
-    { id: 24, name: 'Zalo', icon: './provider/zalo.png', color: '#0068ff' },
-    { id: 25, name: 'Hangouts', icon: './provider/hangouts.png', color: '#0f9d58' },
-    { id: 26, name: 'TextNow', icon: './provider/textnow.png', color: '#8839fb' },
-    { id: 27, name: 'Text Free', icon: './provider/textfree.png', color: '#6633cc' },
-  ];
+  const api = (window as any).electronAPI as Record<string, any> | undefined;
 
-  const providerUrls: Record<number, string> = {
-    1: "https://web.whatsapp.com",
-    2: "https://web.telegram.org",
-    3: "https://line.me",
-    4: "https://instagram.com",
-    5: "https://www.messenger.com/login",
-    8: "https://discord.com/login",
-    6: "https://www.facebook.com/login",
-    10: "https://www.tiktok.com/login",
-    12: "https://teams.microsoft.com/",
-    13: "https://tinder.com/app/login",
-    14: "https://www.snapchat.com/",
-    15: "https://www.linkedin.com/login",
-    16: "https://mail.google.com/",
-    17: "https://vk.com",
-    19: "https://chat.deepseek.com",
-    20: "https://chatgpt.com/",
-    21: "https://docs.google.com/spreadsheets/",
-    22: "https://voice.google.com/",
-    23: "https://twitter.com/login",
-    24: "https://chat.zalo.me/",
-    25: "https://hangouts.google.com/",
-    26: "https://www.textnow.com/login",
-    27: "https://messages.textfree.us/login",
-    28: "https://app.slack.com/client",
-  };
-
-  // State
-  const [providers, setProviders] = useState<Provider[]>([
-    { id: 1, name: "WhatsApp", icon: "./provider/whatsapp.png", color: "#25d366", notifications: 0, muted: false },
-  ]);
-
-  const [accounts, setAccounts] = useState<Record<number, Account[]>>({
-    1: [
-      { id: 101, name: "Account 1", notifications: 0, color: "#25d366", muted: false },
-      { id: 102, name: "Account 2", notifications: 0, color: "#25d366", muted: false },
-      { id: 103, name: "Account 3", notifications: 0, color: "#25d366", muted: false },
-      { id: 104, name: "Account 4", notifications: 0, color: "#25d366", muted: false },
-      { id: 105, name: "Account 5", notifications: 0, color: "#25d366", muted: false },
-      { id: 106, name: "Account 6", notifications: 0, color: "#25d366", muted: false }
-    ],
-    2: [{ id: 201, name: "Account 1", notifications: 0, color: "#0088cc", muted: false }],
-    3: [{ id: 301, name: "Account 1", notifications: 0, color: "#00b900", muted: false }],
-    4: [{ id: 401, name: "Account 1", notifications: 0, color: "#e4405f", muted: false }],
-    8: [{ id: 801, name: "Account 1", notifications: 0, color: "#5865f2", muted: false }],
-    17: [{ id: 1701, name: "Account 1", notifications: 0, color: "#4c75a3", muted: false }],
-    19: [{ id: 1901, name: "Account 1", notifications: 0, color: "#5d5fef", muted: false }],
-    20: [{ id: 2001, name: "Account 1", notifications: 0, color: "#10a37f", muted: false }],
-    21: [{ id: 2101, name: "Account 1", notifications: 0, color: "#0b57d0", muted: false }],
-  });
-
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [accounts, setAccounts]   = useState<AccountMap>({});
   const [activeProviderId, setActiveProviderId] = useState<number>(1);
-  const [activeAccountId, setActiveAccountId] = useState<number>(101);
-  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
-  const [showAddProviderModal, setShowAddProviderModal] = useState<boolean>(false);
-  const [providerSearch, setProviderSearch] = useState<string>('');
-  const [showEditAccountModal, setShowEditAccountModal] = useState<boolean>(false);
-  const [editAccountName, setEditAccountName] = useState<string>('');
-  const [editProviderId, setEditProviderId] = useState<number | null>(null);
-  const [editAccountId, setEditAccountId] = useState<number | null>(null);
+  const [activeAccountId,  setActiveAccountId]  = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  
-  // PERFORMANCE: Always enabled
-  const backgroundUpdatesEnabled = true;
 
-  const [loadedAccountKeys, setLoadedAccountKeys] = useState<string[]>([]);
-  const [showContextMenu, setShowContextMenu] = useState<boolean>(false);
-  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
-  const [contextAccountId, setContextAccountId] = useState<number | null>(null);
-  const [contextProviderId, setContextProviderId] = useState<number | null>(null);
-  const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
+  // Modal visibility
+  const [showSettingsModal,    setShowSettingsModal]    = useState(false);
+  const [showAddProviderModal, setShowAddProviderModal] = useState(false);
+  const [showEditAccountModal, setShowEditAccountModal] = useState(false);
+  const [showSupportModal,     setShowSupportModal]     = useState(false);
 
-  // Drag and Drop State
+  // Context menu
+  const [showContextMenu,      setShowContextMenu]      = useState(false);
+  const [contextMenuPos,       setContextMenuPos]       = useState({ x: 0, y: 0 });
+  const [contextProviderId,    setContextProviderId]    = useState<number | null>(null);
+  const [contextAccountId,     setContextAccountId]     = useState<number | null>(null);
+
+  // Edit modal
+  const [editAccountName,  setEditAccountName]  = useState('');
+  const [editProviderId,   setEditProviderId]   = useState<number | null>(null);
+  const [editAccountId,    setEditAccountId]    = useState<number | null>(null);
+
+  // Provider search
+  const [providerSearch, setProviderSearch] = useState('');
+
+  // Drag-and-drop
   const [draggedProviderId, setDraggedProviderId] = useState<number | null>(null);
 
-  const prevAccountsRef = useRef<Record<number, Account[]>>({});
+  // LRU warm webview cache
+  const [loadedAccountKeys, setLoadedAccountKeys] = useState<string[]>([]);
 
-  // Effects
-  useEffect(() => {
-    // Fast initial loading
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 100);
+  // ── Refs ───────────────────────────────────────────────────────────────────
+  // Keep latest providers accessible inside async/event callbacks without stale closures
+  const providersRef = useRef<Provider[]>([]);
+  providersRef.current = providers;
 
-    return () => clearTimeout(timer);
-  }, []);
+  const accountsRef = useRef<AccountMap>({});
+  accountsRef.current = accounts;
 
-  // Load persisted providers/accounts on start
+  // Track which backgrounds are running to avoid duplicates
+  const runningBgSet = useRef(new Set<string>());
+
+  // ── Persistence — Load on mount ────────────────────────────────────────────
   useEffect(() => {
     try {
       const savedProviders = localStorage.getItem('providers');
-      const savedAccounts = localStorage.getItem('accounts');
+      const savedAccounts  = localStorage.getItem('accounts');
+
       if (savedProviders) {
         const parsed: Provider[] = JSON.parse(savedProviders);
         setProviders(parsed.map(p => ({ ...p, muted: p.muted ?? false })));
+      } else {
+        // Default: WhatsApp with one account
+        setProviders([{ id: 1, name: 'WhatsApp', icon: './provider/whatsapp.png', color: '#25d366', notifications: 0, muted: false }]);
       }
+
       if (savedAccounts) {
-        const parsed: Record<number, Account[]> = JSON.parse(savedAccounts);
-        const withMute: Record<number, Account[]> = {};
+        const parsed: AccountMap = JSON.parse(savedAccounts);
+        const withDefaults: AccountMap = {};
         Object.keys(parsed).forEach(key => {
           const pid = Number(key);
-          withMute[pid] = (parsed[pid] || []).map(a => ({ ...a, muted: a.muted ?? false }));
+          withDefaults[pid] = (parsed[pid] || []).map(a => ({ ...a, muted: a.muted ?? false }));
         });
-        setAccounts(withMute);
+        setAccounts(withDefaults);
+      } else {
+        setAccounts({ 1: [{ id: 101, name: 'Account 1', notifications: 0, color: '#25d366', muted: false }] });
+        setActiveProviderId(1);
+        setActiveAccountId(101);
       }
-    } catch { }
+    } catch { /* ignore corrupt storage */ }
+
+    const timer = setTimeout(() => setIsLoading(false), 80);
+    return () => clearTimeout(timer);
   }, []);
 
-  // Persist providers/accounts whenever they change
+  // Set sensible default active IDs once providers/accounts are loaded
   useEffect(() => {
-    try {
-      localStorage.setItem('providers', JSON.stringify(providers));
-    } catch { }
-  }, [providers]);
+    if (providers.length > 0 && activeAccountId === 0) {
+      const pid  = providers[0].id;
+      const accs = accounts[pid];
+      if (accs && accs.length > 0) {
+        setActiveProviderId(pid);
+        setActiveAccountId(accs[0].id);
+      }
+    }
+  }, [providers, accounts]); // eslint-disable-line
 
+  // ── Persistence — Save on change (debounced) ───────────────────────────────
   useEffect(() => {
-    try {
-      localStorage.setItem('accounts', JSON.stringify(accounts));
-    } catch { }
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem('providers', JSON.stringify(providers));
+        localStorage.setItem('accounts',  JSON.stringify(accounts));
+      } catch {}
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [providers, accounts]);
+
+  // ── Sync provider notification counts from accounts (debounced) ────────────
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setProviders(prev => prev.map(p => {
+        const accs  = accountsRef.current[p.id] || [];
+        const total = accs.reduce((sum, a) => sum + a.notifications, 0);
+        // Avoid object churn if nothing changed
+        return p.notifications === total ? p : { ...p, notifications: total };
+      }));
+    }, 200);
+    return () => clearTimeout(t);
   }, [accounts]);
 
-  // Close context menu on escape key
+  // ── IPC: message-detected (main-process background polling) ───────────────
   useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && showContextMenu) {
-        setShowContextMenu(false);
+    if (!api?.onMessageDetected) return;
+
+    const handleMessageDetected = (data: {
+      providerId: number; accountId: number; count: number; message?: string | null;
+    }) => {
+      if (!data) return;
+      const { providerId, accountId, count, message } = data;
+
+      setAccounts(prev => {
+        const accs = prev[providerId];
+        if (!accs) return prev;
+        const acc = accs.find(a => a.id === accountId);
+        if (!acc) return prev;
+
+        // Read mute state from the latest ref to avoid stale closure
+        const providerMuted = providersRef.current.find(p => p.id === providerId)?.muted ?? false;
+        if (providerMuted || acc.muted) return prev;
+
+        if (count <= acc.notifications && message === acc.lastMessage) return prev; // no change
+
+        return {
+          ...prev,
+          [providerId]: accs.map(a =>
+            a.id === accountId
+              ? { ...a, notifications: Math.max(a.notifications, count), lastMessage: message ?? a.lastMessage }
+              : a
+          ),
+        };
+      });
+    };
+
+    api.onMessageDetected(handleMessageDetected);
+
+    // Cleanup: remove listener when component unmounts
+    return () => { try { api.offMessageDetected?.(); } catch {} };
+  }, []); // eslint-disable-line — intentionally runs once; uses refs for fresh data
+
+  // ── Report active context to main (for notification suppression) ──────────
+  useEffect(() => {
+    let focusStatus = true;
+    const sendContext = () => {
+      if (api?.setActiveContext && activeProviderId && activeAccountId) {
+        // Send 0,0 if not focused, otherwise send actual IDs to suppress notifications
+        try {
+          if (focusStatus) {
+            api.setActiveContext(activeProviderId, activeAccountId);
+          } else {
+            api.setActiveContext(0, 0);
+          }
+        } catch {}
       }
     };
 
-    document.addEventListener('keydown', handleEscape);
-    document.addEventListener('click', () => setShowContextMenu(false));
+    const handleFocus = (data: { focused: boolean }) => {
+      focusStatus = data?.focused ?? true;
+      sendContext();
+    };
+
+    if (api?.onWindowFocusChanged) {
+      api.onWindowFocusChanged(handleFocus);
+    }
+    
+    // Initial send
+    sendContext();
 
     return () => {
-      document.removeEventListener('keydown', handleEscape);
-      document.removeEventListener('click', () => setShowContextMenu(false));
+      try { api?.offWindowFocusChanged?.(); } catch {}
+    };
+  }, [activeProviderId, activeAccountId]);
+
+  // ── LRU warm cache of webview keys ────────────────────────────────────────
+  useEffect(() => {
+    if (!activeProviderId || !activeAccountId) return;
+    const key = `${activeProviderId}-${activeAccountId}`;
+    setLoadedAccountKeys(prev => {
+      const next = [key, ...prev.filter(k => k !== key)];
+      return next.slice(0, WARM_LIMIT);
+    });
+  }, [activeProviderId, activeAccountId]);
+
+  // ── Start/stop main-process background polling ─────────────────────────────
+  useEffect(() => {
+    if (!api?.startBackground) return;
+
+    const started: Array<{ pid: number; aid: number }> = [];
+
+    Object.keys(accounts).forEach(k => {
+      const pid = Number(k);
+      if (!isBackgroundPollEnabled(pid)) return;
+      (accounts[pid] || []).forEach(acc => {
+        const bgKey = `${pid}-${acc.id}`;
+        if (runningBgSet.current.has(bgKey)) return; // already running
+
+        const partition = `persist:pv_${pid}_acc_${acc.id}`;
+        const url       = getProviderUrl(pid);
+        const userAgent = pid === 2 ? getTelegramUserAgent(acc.id) : '';
+
+        try {
+          api.startBackground(pid, acc.id, url, partition, userAgent);
+          runningBgSet.current.add(bgKey);
+          started.push({ pid, aid: acc.id });
+        } catch {}
+      });
+    });
+
+    // Note: we do NOT stop backgrounds when accounts change (accounts only ever grow,
+    // and stopping/restarting would cause sessions to drop). Cleanup happens in stop-on-delete.
+  }, [accounts]); // eslint-disable-line
+
+  // ── Context menu: close on Escape / outside click ─────────────────────────
+  useEffect(() => {
+    if (!showContextMenu) return;
+    const close = () => setShowContextMenu(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('click',   close);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('click',   close);
     };
   }, [showContextMenu]);
 
-  // Update provider notifications when accounts change
-  useEffect(() => {
-    setProviders(prev => prev.map(provider => {
-      const providerAccounts = accounts[provider.id] || [];
-      const totalNotifications = providerAccounts.reduce((sum, account) => sum + account.notifications, 0);
-      return { ...provider, notifications: totalNotifications };
-    }));
-  }, [accounts]);
+  // ── Computed ───────────────────────────────────────────────────────────────
+  const currentProvider = useMemo(() =>
+    providers.find(p => p.id === activeProviderId), [providers, activeProviderId]);
 
-  useEffect(() => {
-    const prev = prevAccountsRef.current;
-    Object.keys(accounts).forEach(key => {
-      const providerId = Number(key);
-      const newAccounts = accounts[providerId] || [];
-      const prevAccounts = prev[providerId] || [];
-      const prevMap = new Map(prevAccounts.map(a => [a.id, a.notifications]));
-      newAccounts.forEach(account => {
-        const prevCount = prevMap.get(account.id) ?? 0;
-        if (account.notifications > prevCount && account.notifications > 0) {
-          const provider = providers.find(p => p.id === providerId);
-          if (provider && provider.muted) {
-            return;
-          }
-          if (account.muted) {
-            return;
-          }
-          const title = provider ? `${provider.name} • ${account.name}` : account.name;
-          const body =
-            account.notifications === 1
-              ? 'You have 1 unread message'
-              : `You have ${account.notifications} unread messages`;
-          const api = (window as any).electronAPI;
-          if (api && typeof api.showNotification === 'function') {
-            api.showNotification(title, body);
-          }
-        }
-      });
+  const currentAccount = useMemo(() =>
+    accounts[activeProviderId]?.find(a => a.id === activeAccountId),
+    [accounts, activeProviderId, activeAccountId]);
+
+  const filteredAllProviders = useMemo(() =>
+    ALL_PROVIDERS.filter(p => {
+      const matches = p.name.toLowerCase().includes(providerSearch.toLowerCase());
+      const added   = providers.some(x => x.id === p.id);
+      return matches && !added;
+    }),
+    [providers, providerSearch]);
+
+  // Stable sorted providers for webview pool (prevents pool re-sort on provider re-order)
+  const stableProviders = useMemo(() =>
+    [...providers].sort((a, b) => a.id - b.id), [providers]);
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+  const handleProviderClick = useCallback((providerId: number) => {
+    setActiveProviderId(providerId);
+    const accs = accountsRef.current[providerId];
+    if (accs && accs.length > 0) setActiveAccountId(accs[0].id);
+  }, []);
+
+  const handleAccountClick = useCallback((accountId: number) => {
+    setActiveAccountId(accountId);
+    // Clear badge when user views the account
+    setAccounts(prev => {
+      const pid  = activeProviderId;
+      const accs = prev[pid];
+      if (!accs) return prev;
+      const acc = accs.find(a => a.id === accountId);
+      if (!acc || acc.notifications === 0) return prev;
+      return { ...prev, [pid]: accs.map(a => a.id === accountId ? { ...a, notifications: 0 } : a) };
     });
-    prevAccountsRef.current = accounts;
-  }, [accounts, providers]);
+  }, [activeProviderId]);
 
-  // Mark active account as loaded so it stays warm for future switches
-  useEffect(() => {
-    const key = `${activeProviderId}-${activeAccountId}`;
-    if (!activeProviderId || !activeAccountId) return;
-    setLoadedAccountKeys(prev => prev.includes(key) ? prev : [...prev, key]);
+
+  const setUnreadCount = useCallback((
+    providerId: number, accountId: number, count: number, message?: string | null
+  ) => {
+    setAccounts(prev => {
+      const accs = prev[providerId];
+      if (!accs) return prev;
+      return {
+        ...prev,
+        [providerId]: accs.map(a => {
+          if (a.id !== accountId) return a;
+          const provMuted = providersRef.current.find(p => p.id === providerId)?.muted ?? false;
+          const effective = (provMuted || a.muted) ? 0 : count;
+          if (a.notifications === effective && a.lastMessage === (message ?? a.lastMessage)) return a;
+          return { ...a, notifications: effective, lastMessage: message ?? a.lastMessage ?? null };
+        }),
+      };
+    });
+  }, []);
+
+  const toggleProviderMute = useCallback((providerId: number) => {
+    setProviders(prev => prev.map(p => {
+      if (p.id !== providerId) return p;
+      const nextMuted = !p.muted;
+      if (nextMuted) {
+        // Clear badges when muting
+        setAccounts(a => ({
+          ...a,
+          [providerId]: (a[providerId] || []).map(acc => ({ ...acc, notifications: 0 })),
+        }));
+      }
+      return { ...p, muted: nextMuted };
+    }));
+  }, []);
+
+  const toggleAccountMute = useCallback((providerId: number, accountId: number) => {
+    setAccounts(prev => {
+      const accs = prev[providerId];
+      if (!accs) return prev;
+      return {
+        ...prev,
+        [providerId]: accs.map(a =>
+          a.id === accountId
+            ? { ...a, muted: !a.muted, notifications: !a.muted ? 0 : a.notifications }
+            : a
+        ),
+      };
+    });
+  }, []);
+
+  const handleAddAccount = useCallback(() => {
+    if (!currentProvider) return;
+    const pid      = activeProviderId;
+    const existing = accountsRef.current[pid] || [];
+    const nextId   = existing.length > 0
+      ? existing[existing.length - 1].id + 1
+      : pid * 100 + 1;
+
+    const newAcc: Account = {
+      id: nextId,
+      name: `Account ${existing.length + 1}`,
+      notifications: 0,
+      color: currentProvider.color,
+      muted: false,
+    };
+    setAccounts(prev => ({ ...prev, [pid]: [...(prev[pid] || []), newAcc] }));
+    setActiveAccountId(newAcc.id);
+  }, [activeProviderId, currentProvider]);
+
+  const handleAddProvider = useCallback((provider: typeof ALL_PROVIDERS[number]) => {
+    if (providers.some(p => p.id === provider.id)) return; // already added (guard)
+    const newProvider: Provider = { ...provider, notifications: 0, muted: false };
+    setProviders(prev => [...prev, newProvider]);
+    const defaultAcc: Account = {
+      id: provider.id * 100 + 1,
+      name: 'Account 1',
+      notifications: 0,
+      color: provider.color,
+      muted: false,
+    };
+    setAccounts(prev => ({ ...prev, [provider.id]: [defaultAcc] }));
+    setActiveProviderId(provider.id);
+    setActiveAccountId(defaultAcc.id);
+    setShowAddProviderModal(false);
+    setProviderSearch('');
+  }, [providers]);
+
+  const handleRemoveProvider = useCallback((providerId: number) => {
+    setProviders(prev => {
+      if (prev.length <= 1) {
+        alert('You must have at least one provider connected.');
+        return prev;
+      }
+      const prov = prev.find(p => p.id === providerId);
+      if (!prov || !confirm(`Remove ${prov.name}?`)) return prev;
+      const remaining = prev.filter(p => p.id !== providerId);
+      if (activeProviderId === providerId && remaining.length > 0) {
+        const np = remaining[0];
+        setActiveProviderId(np.id);
+        const accs = accountsRef.current[np.id];
+        if (accs && accs.length > 0) setActiveAccountId(accs[0].id);
+      }
+      return remaining;
+    });
+    setShowSettingsModal(false);
+  }, [activeProviderId]);
+
+  const deleteAccount = useCallback((providerId: number, accountId: number) => {
+    if (!confirm('Delete this account?')) return;
+
+    // Stop background polling for this account
+    try { api?.stopBackground?.(providerId, accountId); } catch {}
+    runningBgSet.current.delete(`${providerId}-${accountId}`);
+
+    setAccounts(prev => {
+      const remaining = (prev[providerId] || []).filter(a => a.id !== accountId);
+      if (activeProviderId === providerId && activeAccountId === accountId) {
+        setActiveAccountId(remaining.length > 0 ? remaining[0].id : 0);
+      }
+      return { ...prev, [providerId]: remaining };
+    });
   }, [activeProviderId, activeAccountId]);
 
-  // High Performance Mode: Preload ALL accounts to ensure instant switching
-  useEffect(() => {
-    if (backgroundUpdatesEnabled) {
-      // Collect all account keys
-      const allKeys: string[] = [];
-      providers.forEach(p => {
-        const pAccounts = accounts[p.id] || [];
-        pAccounts.forEach(a => {
-           allKeys.push(`${p.id}-${a.id}`);
-        });
-      });
-      
-      setLoadedAccountKeys(prev => {
-        const uniqueKeys = new Set([...prev, ...allKeys]);
-        if (uniqueKeys.size === prev.length) return prev;
-        return Array.from(uniqueKeys);
-      });
-    }
-  }, [providers, accounts, backgroundUpdatesEnabled]);
-
-  // Filter providers not yet added and matching search
-  const filteredProviders = allProviders.filter(p => {
-    const matches = p.name.toLowerCase().includes(providerSearch.toLowerCase());
-    const exists = providers.some(x => x.id === p.id);
-    return matches && !exists;
-  });
-
-  // Current provider and account
-  const currentProvider = providers.find(p => p.id === activeProviderId);
-  const currentAccount = accounts[activeProviderId]?.find(a => a.id === activeAccountId);
-
-  // Handlers
-  const handleProviderClick = (providerId: number) => {
-    setActiveProviderId(providerId);
-    const providerAccounts = accounts[providerId];
-    if (providerAccounts && providerAccounts.length > 0) {
-      setActiveAccountId(providerAccounts[0].id);
-    }
-  };
-
-  const toggleProviderMute = (providerId: number) => {
-    const current = providers.find(p => p.id === providerId);
-    const nextMuted = current ? !current.muted : true;
-
-    setProviders(prev =>
-      prev.map(provider =>
-        provider.id === providerId ? { ...provider, muted: nextMuted } : provider
-      )
-    );
-
-    if (nextMuted) {
-      setAccounts(prev => ({
-        ...prev,
-        [providerId]: (prev[providerId] || []).map(account => ({
-          ...account,
-          notifications: 0
-        }))
-      }));
-    }
-  };
-
-  const handleAccountClick = (accountId: number) => {
-    setActiveAccountId(accountId);
-    // Clear notifications when user clicks on the account
-    clearAccountNotifications(activeProviderId, accountId);
-  };
-
-  const toggleAccountMute = (providerId: number, accountId: number) => {
-    const currentList = accounts[providerId] || [];
-    const current = currentList.find(a => a.id === accountId);
-    const nextMuted = current ? !current.muted : true;
-
-    setAccounts(prev => ({
-      ...prev,
-      [providerId]: (prev[providerId] || []).map(account =>
-        account.id === accountId
-          ? { ...account, muted: nextMuted, notifications: nextMuted ? 0 : account.notifications }
-          : account
-      )
-    }));
-  };
-
-  const handleAccountContextMenu = (e: React.MouseEvent, providerId: number, accountId: number, accountName: string) => {
-    e.preventDefault();
-
-    const x = e.clientX;
-    const y = e.clientY;
-
-    setContextMenuPosition({ x, y });
-    setContextProviderId(providerId);
-    setContextAccountId(accountId);
-    setEditAccountName(accountName);
-    setShowContextMenu(true);
-  };
-
-  const openEditAccount = (providerId: number, accountId: number) => {
-    const acct = accounts[providerId]?.find(a => a.id === accountId);
-    if (!acct) return;
+  const openEditAccount = useCallback((providerId: number, accountId: number) => {
+    const acc = accountsRef.current[providerId]?.find(a => a.id === accountId);
+    if (!acc) return;
     setEditProviderId(providerId);
     setEditAccountId(accountId);
-    setEditAccountName(acct.name);
+    setEditAccountName(acc.name);
     setShowEditAccountModal(true);
-  };
+  }, []);
 
-  const saveEditAccount = () => {
+  const saveEditAccount = useCallback(() => {
     if (editProviderId == null || editAccountId == null) return;
     const name = editAccountName.trim();
-    if (!name) {
-      alert('Please enter a valid account name.');
-      return;
-    }
+    if (!name) { alert('Please enter a valid name.'); return; }
     setAccounts(prev => ({
       ...prev,
-      [editProviderId]: (prev[editProviderId] || []).map(a => a.id === editAccountId ? { ...a, name } : a)
+      [editProviderId]: (prev[editProviderId] || []).map(a =>
+        a.id === editAccountId ? { ...a, name } : a
+      ),
     }));
     setShowEditAccountModal(false);
-  };
+  }, [editProviderId, editAccountId, editAccountName]);
 
-  const deleteAccountDirect = (providerId: number, accountId: number) => {
-    if (window.confirm('Are you sure you want to delete this account?')) {
-      setAccounts(prev => {
-        const remaining = (prev[providerId] || []).filter(a => a.id !== accountId);
-        const next = { ...prev, [providerId]: remaining };
-
-        if (activeProviderId === providerId && activeAccountId === accountId) {
-          if (remaining.length > 0) {
-            setActiveAccountId(remaining[0].id);
-          } else {
-            setActiveAccountId(0);
-          }
-        }
-
-        return next;
-      });
-    }
-  };
-
-
-
-  // Update unread count directly (from title-based detection)
-  const setUnreadCount = (providerId: number, accountId: number, count: number) => {
-    const provider = providers.find(p => p.id === providerId);
-    const providerMuted = provider?.muted;
-
-    setAccounts(prev => ({
-      ...prev,
-      [providerId]: (prev[providerId] || []).map(account => {
-        if (account.id !== accountId) return account;
-        const accountMuted = account.muted;
-        const effectiveCount = providerMuted || accountMuted ? 0 : count;
-        return { ...account, notifications: effectiveCount };
-      })
-    }));
-  };
-
-  const clearAccountNotifications = (providerId: number, accountId: number) => {
-    setAccounts(prev => ({
-      ...prev,
-      [providerId]: (prev[providerId] || []).map(account =>
-        account.id === accountId
-          ? { ...account, notifications: 0 }
-          : account
-      )
-    }));
-  };
-
-  const handleRemoveProvider = (providerId: number) => {
-    if (providers.length <= 1) {
-      alert("You must have at least one provider connected.");
-      return;
-    }
-
-    const provider = providers.find(p => p.id === providerId);
-    if (!provider || !confirm(`Are you sure you want to remove ${provider.name}?`)) return;
-
-    // Remove provider
-    setProviders(prev => prev.filter(p => p.id !== providerId));
-
-    // Switch to first available provider if removing active one
-    if (activeProviderId === providerId) {
-      const remainingProviders = providers.filter(p => p.id !== providerId);
-      if (remainingProviders.length > 0) {
-        setActiveProviderId(remainingProviders[0].id);
-        const providerAccounts = accounts[remainingProviders[0].id];
-        if (providerAccounts && providerAccounts.length > 0) {
-          setActiveAccountId(providerAccounts[0].id);
-        }
-      }
-    }
-
-    setShowSettingsModal(false);
-    alert(`${provider.name} has been removed.`);
-  };
-
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     setIsLoading(true);
-    setTimeout(() => setIsLoading(false), 500);
-  };
+    setTimeout(() => setIsLoading(false), 400);
+  }, []);
 
-  const handleOpenInNewWindow = () => {
-    const url = providerUrls[activeProviderId];
-    if (url) {
-      window.open(url, '_blank');
-    }
-  };
-
-  const handleFullscreen = () => {
-    const elem = document.documentElement;
+  const handleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
-      elem.requestFullscreen().catch(console.log);
+      document.documentElement.requestFullscreen().catch(() => {});
     } else {
       document.exitFullscreen();
     }
-  };
+  }, []);
 
-  const handleAddAccount = () => {
-    if (!currentProvider) return;
-    const nextIdBase = (accounts[activeProviderId]?.[accounts[activeProviderId].length - 1]?.id || (activeProviderId * 100)) + 1;
-    const newAccount: Account = {
-      id: nextIdBase,
-      name: `Account ${accounts[activeProviderId]?.length ? accounts[activeProviderId].length + 1 : 1}`,
-      notifications: 0,
-      color: currentProvider.color,
-      muted: false
-    };
-    setAccounts(prev => ({
-      ...prev,
-      [activeProviderId]: [...(prev[activeProviderId] || []), newAccount]
-    }));
-    setActiveAccountId(newAccount.id);
-  };
-
-  const handleAddProvider = (provider: Pick<Provider, 'id' | 'name' | 'icon' | 'color'>) => {
-    if (providers.some(p => p.id === provider.id)) {
-      alert(`${provider.name} is already added.`);
-      return;
+  const handleOpenInBrowser = useCallback(() => {
+    const url = getProviderUrl(activeProviderId);
+    if (url && url !== 'about:blank') {
+      window.open(url, '_blank');
     }
-    const newProvider: Provider = { ...provider, notifications: 0, muted: false };
-    setProviders(prev => [...prev, newProvider]);
-    // Add default account
-    setAccounts(prev => ({
-      ...prev,
-      [provider.id]: [{ id: provider.id * 100 + 1, name: 'Account 1', notifications: 0, color: provider.color, muted: false }]
-    }));
-    setActiveProviderId(provider.id);
-    setActiveAccountId(provider.id * 100 + 1);
-    setShowAddProviderModal(false);
-    setProviderSearch('');
-  };
+  }, [activeProviderId]);
 
-  // Drag and Drop Handlers
-  const handleDragStart = (e: React.DragEvent, providerId: number) => {
+  const handleResetApp = useCallback(async () => {
+    if (!confirm('Factory Reset: delete all accounts, sessions, and settings?')) return;
+    localStorage.clear();
+    try { await api?.clearAllData?.(); } catch {}
+    window.location.reload();
+  }, []);
+
+  // ── Drag and Drop ──────────────────────────────────────────────────────────
+  const handleDragStart = useCallback((e: React.DragEvent, providerId: number) => {
     e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', providerId.toString());
-    // Delay state update to allow drag to start smoothly
+    e.dataTransfer.setData('text/plain', String(providerId));
     requestAnimationFrame(() => setDraggedProviderId(providerId));
-  };
+  }, []);
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-  };
+  }, []);
 
-  const handleDrop = (e: React.DragEvent, targetProviderId: number) => {
+  const handleDrop = useCallback((e: React.DragEvent, targetId: number) => {
     e.preventDefault();
     e.stopPropagation();
+    let sourceId = draggedProviderId ?? parseInt(e.dataTransfer.getData('text/plain'), 10);
+    if (!sourceId || sourceId === targetId) { setDraggedProviderId(null); return; }
 
-    // Get dragged ID from state or dataTransfer as fallback
-    let sourceId = draggedProviderId;
-    if (sourceId === null) {
-      const data = e.dataTransfer.getData('text/plain');
-      if (data) sourceId = parseInt(data, 10);
-    }
-
-    if (sourceId === null || sourceId === targetProviderId) {
-      setDraggedProviderId(null);
-      return;
-    }
-
-    const draggedIndex = providers.findIndex(p => p.id === sourceId);
-    const targetIndex = providers.findIndex(p => p.id === targetProviderId);
-
-    if (draggedIndex === -1 || targetIndex === -1) {
-      setDraggedProviderId(null);
-      return;
-    }
-
-    const newProviders = [...providers];
-    const [draggedItem] = newProviders.splice(draggedIndex, 1);
-    newProviders.splice(targetIndex, 0, draggedItem);
-
-    setProviders(newProviders);
+    setProviders(prev => {
+      const src = prev.findIndex(p => p.id === sourceId);
+      const tgt = prev.findIndex(p => p.id === targetId);
+      if (src === -1 || tgt === -1) return prev;
+      const next = [...prev];
+      const [item] = next.splice(src, 1);
+      next.splice(tgt, 0, item);
+      return next;
+    });
     setDraggedProviderId(null);
-  };
+  }, [draggedProviderId]);
 
-  const handleDragEnd = () => {
-    setDraggedProviderId(null);
-  };
+  const handleDragEnd = useCallback(() => setDraggedProviderId(null), []);
 
-  // Render pooled webviews: keep all accounts mounted, show/hide instead of remounting
-  const stableProviders = useMemo(() => [...providers].sort((a, b) => a.id - b.id), [providers]);
+  // ── Webview Pool ───────────────────────────────────────────────────────────
+  const renderWebviewPool = () => (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {stableProviders.map(p =>
+        (accounts[p.id] || []).map(a => {
+          const k        = `${p.id}-${a.id}`;
+          const visible  = p.id === activeProviderId && a.id === activeAccountId;
+          const shouldLoad = visible || loadedAccountKeys.includes(k);
+          const url      = shouldLoad ? getProviderUrl(p.id) : 'about:blank';
+          const isMuted  = !!p.muted || !!a.muted;
+          // If main process is polling this provider, renderer skips its own polling
+          const mainPolling = isBackgroundPollEnabled(p.id);
 
-  const renderWebviewsPool = () => {
-    return (
-      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        {stableProviders.map(p => (
-          (accounts[p.id] || []).map(a => {
-            const k = `${p.id}-${a.id}`;
-            const visible = p.id === activeProviderId && a.id === activeAccountId;
-            // Lazy load: Only load if visible, OR if it has been loaded before AND background updates are enabled.
-            const hasBeenLoaded = loadedAccountKeys.includes(k);
-            const shouldLoad = visible || (backgroundUpdatesEnabled && hasBeenLoaded);
-
-            const url = shouldLoad ? (providerUrls[p.id] || 'about:blank') : 'about:blank';
-            const isMuted = !!p.muted || !!a.muted;
-            return (
-              <AccountWebView
-                key={`pool-${p.id}-${a.id}`}
-                providerId={p.id}
-                accountId={a.id}
-                url={url}
-                visible={visible}
-                backgroundUpdatesEnabled={backgroundUpdatesEnabled}
-                onUnreadChange={setUnreadCount}
-                muted={isMuted}
-              />
-            );
-          })
-        ))}
-        {isLoading && (
-          <div className="loading-container" style={{ position: 'absolute', inset: 0 }}>
-            <div className="spinner"></div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Render Modals
-  const renderSettingsModal = () => (
-    <div className={`modal ${showSettingsModal ? 'active' : ''}`} onClick={() => setShowSettingsModal(false)}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-title">Connected Providers</div>
-          <div className="modal-close" onClick={() => setShowSettingsModal(false)}>
-            <i className="fa-solid fa-times"></i>
-          </div>
+          return (
+            <AccountWebView
+              key={`pool-${p.id}-${a.id}`}
+              providerId={p.id}
+              accountId={a.id}
+              url={url}
+              visible={visible}
+              mainProcessPolling={mainPolling}
+              onUnreadChange={setUnreadCount}
+              muted={isMuted}
+            />
+          );
+        })
+      )}
+      {isLoading && (
+        <div className="loading-container" style={{ position: 'absolute', inset: 0 }}>
+          <div className="spinner"></div>
         </div>
-        <div className="modal-body">
-          <div className="settings-provider-list">
-            {providers.map(provider => (
-              <div key={provider.id} className="settings-provider-item">
-                <div className="settings-provider-icon" >
-                  <img src={provider.icon} style={{ width: '100%' }} draggable={false} />
-                </div>
-                <div className="settings-provider-info">
-                  <div className="settings-provider-name">{provider.name}</div>
-                  <div className="settings-provider-status">
-                    <span>•</span>
-                    <span>{provider.notifications} unread</span>
-                  </div>
-                </div>
-                <div className="settings-provider-actions">
-                  <div
-                    className="action-btn edit"
-                    title={provider.muted ? 'Unmute Provider' : 'Mute Provider'}
-                    onClick={() => toggleProviderMute(provider.id)}
-                  >
-                    <i className={provider.muted ? 'fas fa-bell' : 'fas fa-bell-slash'}></i>
-                  </div>
-                  <div className="action-btn remove"
-                    title="Remove Provider"
-                    onClick={() => handleRemoveProvider(provider.id)}
-                  >
-                    <i className="fas fa-trash"></i>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="modal-actions">
-          <button className="btn btn-primary" onClick={() => setShowSettingsModal(false)}>
-            Close
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 
-  const handleResetApp = async () => {
-    if (confirm('Are you sure you want to reset the app? This will delete all accounts, settings, and sessions (Factory Reset).')) {
-      // Clear localStorage
-      localStorage.clear();
-      
-      // Clear Electron sessions
-      if ((window as any).electronAPI?.clearAllData) {
-        await (window as any).electronAPI.clearAllData();
-      }
-
-      // Reload
-      window.location.reload();
-    }
-  };
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="account-manager">
-      {/* Sidebar */}
+      {/* Left Sidebar */}
       <div className="sidebar">
         <div className="logo-area" onClick={() => setShowSupportModal(true)} style={{ cursor: 'pointer' }}>
           <div className="logo">
@@ -650,22 +569,22 @@ const AccountManager: React.FC = () => {
 
         <div className="providers-section">
           {providers.map(provider => (
-            <div 
-              key={provider.id} 
+            <div
+              key={provider.id}
               className="provider-icon-wrapper"
-              draggable={true}
+              draggable
               onDragStart={(e) => handleDragStart(e, provider.id)}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, provider.id)}
               onDragEnd={handleDragEnd}
-              style={{ opacity: draggedProviderId === provider.id ? 0.5 : 1, cursor: 'grab' }}
+              style={{ opacity: draggedProviderId === provider.id ? 0.4 : 1, cursor: 'grab' }}
             >
               <div
-                  className={`provider-icon ${activeProviderId === provider.id ? 'active' : ''}`}
-                  title={provider.name}
-                  onClick={() => handleProviderClick(provider.id)}
-                >
-                  <img src={provider.icon} style={{ width: '100%' }} draggable={false} />
+                className={`provider-icon ${activeProviderId === provider.id ? 'active' : ''}`}
+                title={provider.name}
+                onClick={() => handleProviderClick(provider.id)}
+              >
+                <img src={provider.icon} style={{ width: '100%' }} draggable={false} alt={provider.name} />
                 {provider.muted && (
                   <div className="provider-mute-indicator">
                     <i className="fa-solid fa-bell-slash"></i>
@@ -683,7 +602,7 @@ const AccountManager: React.FC = () => {
 
         <div className="sidebar-footer">
           <div className="sidebar-icon" title="Add Provider" onClick={() => setShowAddProviderModal(true)}>
-            <i className="fa-solid fa-plus" ></i>
+            <i className="fa-solid fa-plus"></i>
           </div>
           <div className="sidebar-icon" title="Settings" onClick={() => setShowSettingsModal(true)}>
             <i className="fa-solid fa-gear"></i>
@@ -696,20 +615,32 @@ const AccountManager: React.FC = () => {
 
       {/* Main Content */}
       <div className="main-content">
-        {/* Top Bar */}
+        {/* Accounts Top Bar */}
         <div className="top-bar">
-            <div className="accounts-scroll">
-            {accounts[activeProviderId]?.map(account => (
+          <div className="accounts-scroll">
+            {(accounts[activeProviderId] || []).map(account => (
               <div
                 key={account.id}
                 className={`account-card ${activeAccountId === account.id ? 'active' : ''}`}
                 onClick={() => handleAccountClick(account.id)}
                 onContextMenu={(e) => {
-                  handleAccountContextMenu(e, activeProviderId, account.id, account.name);
+                  e.preventDefault();
+                  setContextMenuPos({ x: e.clientX, y: e.clientY });
+                  setContextProviderId(activeProviderId);
+                  setContextAccountId(account.id);
+                  setEditAccountName(account.name);
+                  setShowContextMenu(true);
                 }}
               >
                 <div className="account-icon">
-                  <img src={currentProvider?.icon} style={{ width: "100%" }} />
+                  <img
+                    src={currentProvider?.icon}
+                    style={{ width: '100%' }}
+                    decoding="async"
+                    loading="lazy"
+                    draggable={false}
+                    alt=""
+                  />
                   {account.muted && (
                     <div className="account-mute-indicator">
                       <i className="fa-solid fa-bell-slash"></i>
@@ -722,45 +653,99 @@ const AccountManager: React.FC = () => {
                   )}
                 </div>
                 <div className="account-name">{account.name}</div>
-               
               </div>
             ))}
-            <div className="add-account-btn" onClick={handleAddAccount}>
-              <i className="fa-solid fa-plus"></i> 
+            <div className="add-account-btn" onClick={handleAddAccount} title="Add Account">
+              <i className="fa-solid fa-plus"></i>
             </div>
           </div>
-          
-      
         </div>
 
-        {/* Web View Area */}
+        {/* Webview Area */}
         <div className="webview-area">
           <div className="webview-header">
             <div className="webview-title">
-              <div className="webview-title-icon" >
-                <img src={currentProvider?.icon} style={{ width: '100%' }} />
+              <div className="webview-title-icon">
+                <img
+                  src={currentProvider?.icon}
+                  style={{ width: '100%' }}
+                  decoding="async"
+                  loading="lazy"
+                  draggable={false}
+                  alt=""
+                />
               </div>
-              <span>{currentProvider ? `${currentProvider.name}${currentAccount ? ` • ${currentAccount.name}` : ''}` : 'Select a Provider'}</span>
+              <span>
+                {currentProvider
+                  ? `${currentProvider.name}${currentAccount ? ` • ${currentAccount.name}` : ''}`
+                  : 'Select a Provider'}
+              </span>
             </div>
-
-              <div className="webview-header-controls" style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 10 }}>
-             
-             <div className="window-controls" style={{ display: 'flex', gap: 8 }}>
-               <i className="fa-solid fa-expand" onClick={handleFullscreen} title="Fullscreen" style={{ cursor: 'pointer', padding: 5 }}></i>
-               <i className="fa-solid fa-external-link-alt" onClick={handleOpenInNewWindow} title="Open in Browser" style={{ cursor: 'pointer', padding: 5 }}></i>
-               <i className="fa-solid fa-sync-alt" onClick={handleRefresh} title="Refresh" style={{ cursor: 'pointer', padding: 5 }}></i>
-             </div>
-          </div>
+            <div className="webview-header-controls" style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 10 }}>
+              <div className="window-controls" style={{ display: 'flex', gap: 8 }}>
+                <i className="fa-solid fa-expand"            onClick={handleFullscreen}    title="Fullscreen"       style={{ cursor: 'pointer', padding: 5 }}></i>
+                <i className="fa-solid fa-external-link-alt" onClick={handleOpenInBrowser} title="Open in Browser"  style={{ cursor: 'pointer', padding: 5 }}></i>
+                <i className="fa-solid fa-sync-alt"          onClick={handleRefresh}       title="Refresh"          style={{ cursor: 'pointer', padding: 5 }}></i>
+              </div>
+            </div>
           </div>
 
           <div className="webview-container">
-            {renderWebviewsPool()}
+            {renderWebviewPool()}
           </div>
         </div>
       </div>
 
+      {/* ── Modals ── */}
+
       {/* Settings Modal */}
-      {renderSettingsModal()}
+      <div className={`modal ${showSettingsModal ? 'active' : ''}`} onClick={() => setShowSettingsModal(false)}>
+        <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <div className="modal-title">Connected Providers</div>
+            <div className="modal-close" onClick={() => setShowSettingsModal(false)}>
+              <i className="fa-solid fa-times"></i>
+            </div>
+          </div>
+          <div className="modal-body">
+            <div className="settings-provider-list">
+              {providers.map(provider => (
+                <div key={provider.id} className="settings-provider-item">
+                  <div className="settings-provider-icon">
+                    <img src={provider.icon} style={{ width: '100%' }} draggable={false} alt={provider.name} />
+                  </div>
+                  <div className="settings-provider-info">
+                    <div className="settings-provider-name">{provider.name}</div>
+                    <div className="settings-provider-status">
+                      <span>•</span>
+                      <span>{provider.notifications} unread</span>
+                    </div>
+                  </div>
+                  <div className="settings-provider-actions">
+                    <div
+                      className="action-btn edit"
+                      title={provider.muted ? 'Unmute Provider' : 'Mute Provider'}
+                      onClick={() => toggleProviderMute(provider.id)}
+                    >
+                      <i className={provider.muted ? 'fas fa-bell' : 'fas fa-bell-slash'}></i>
+                    </div>
+                    <div
+                      className="action-btn remove"
+                      title="Remove Provider"
+                      onClick={() => handleRemoveProvider(provider.id)}
+                    >
+                      <i className="fas fa-trash"></i>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-primary" onClick={() => setShowSettingsModal(false)}>Close</button>
+          </div>
+        </div>
+      </div>
 
       {/* Edit Account Modal */}
       <div className={`modal ${showEditAccountModal ? 'active' : ''}`} onClick={() => setShowEditAccountModal(false)}>
@@ -771,7 +756,6 @@ const AccountManager: React.FC = () => {
               <i className="fas fa-times"></i>
             </div>
           </div>
-
           <div className="modal-body">
             <div className="input-group">
               <input
@@ -779,19 +763,15 @@ const AccountManager: React.FC = () => {
                 className="modal-input"
                 value={editAccountName}
                 onChange={(e) => setEditAccountName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') saveEditAccount(); }}
                 placeholder="Enter account name"
                 autoFocus
               />
             </div>
           </div>
-
           <div className="modal-footer">
-            <button className="btn-cancel" onClick={() => setShowEditAccountModal(false)}>
-              Cancel
-            </button>
-            <button className="btn-save" onClick={saveEditAccount}>
-              Save Changes
-            </button>
+            <button className="btn-cancel" onClick={() => setShowEditAccountModal(false)}>Cancel</button>
+            <button className="btn-save"   onClick={saveEditAccount}>Save Changes</button>
           </div>
         </div>
       </div>
@@ -802,54 +782,33 @@ const AccountManager: React.FC = () => {
           <div className="context-menu-overlay" onClick={() => setShowContextMenu(false)}></div>
           <div
             className="context-menu"
-            style={{
-              left: `${contextMenuPosition.x}px`,
-              top: `${contextMenuPosition.y}px`
-            }}
+            style={{ left: `${contextMenuPos.x}px`, top: `${contextMenuPos.y}px` }}
           >
-            <div
-              className="context-menu-item"
-              onClick={() => {
-                if (contextProviderId && contextAccountId) {
-                  openEditAccount(contextProviderId, contextAccountId);
-                }
-                setShowContextMenu(false);
-              }}
-            >
+            <div className="context-menu-item" onClick={() => {
+              if (contextProviderId && contextAccountId) openEditAccount(contextProviderId, contextAccountId);
+              setShowContextMenu(false);
+            }}>
               <i className="fas fa-edit"></i> Edit Name
             </div>
-            <div
-              className="context-menu-item"
-              onClick={() => {
-                if (contextProviderId && contextAccountId) {
-                  toggleAccountMute(contextProviderId, contextAccountId);
-                }
-                setShowContextMenu(false);
-              }}
-            >
-              <i className="fas fa-bell-slash"></i> {accounts[contextProviderId || 0]?.find(a => a.id === contextAccountId)?.muted ? 'Unmute Account' : 'Mute Account'}
+            <div className="context-menu-item" onClick={() => {
+              if (contextProviderId && contextAccountId) toggleAccountMute(contextProviderId, contextAccountId);
+              setShowContextMenu(false);
+            }}>
+              <i className="fas fa-bell-slash"></i>{' '}
+              {accounts[contextProviderId ?? 0]?.find(a => a.id === contextAccountId)?.muted ? 'Unmute Account' : 'Mute Account'}
             </div>
-            <div
-              className="context-menu-item"
-              onClick={() => {
-                if (contextProviderId) {
-                  toggleProviderMute(contextProviderId);
-                }
-                setShowContextMenu(false);
-              }}
-            >
-              <i className="fas fa-bell"></i> {providers.find(p => p.id === contextProviderId)?.muted ? 'Unmute Provider' : 'Mute Provider'}
+            <div className="context-menu-item" onClick={() => {
+              if (contextProviderId) toggleProviderMute(contextProviderId);
+              setShowContextMenu(false);
+            }}>
+              <i className="fas fa-bell"></i>{' '}
+              {providers.find(p => p.id === contextProviderId)?.muted ? 'Unmute Provider' : 'Mute Provider'}
             </div>
             <div className="context-menu-divider"></div>
-            <div
-              className="context-menu-item delete"
-              onClick={() => {
-                if (contextProviderId && contextAccountId) {
-                  deleteAccountDirect(contextProviderId, contextAccountId);
-                }
-                setShowContextMenu(false);
-              }}
-            >
+            <div className="context-menu-item delete" onClick={() => {
+              if (contextProviderId && contextAccountId) deleteAccount(contextProviderId, contextAccountId);
+              setShowContextMenu(false);
+            }}>
               <i className="fas fa-trash"></i> Delete Account
             </div>
           </div>
@@ -877,15 +836,15 @@ const AccountManager: React.FC = () => {
               />
             </div>
             <div className="providers-grid">
-              {filteredProviders.map(provider => (
+              {filteredAllProviders.map(provider => (
                 <div key={provider.id} className="provider-grid-item" onClick={() => handleAddProvider(provider)}>
                   <div className="provider-grid-icon">
-                    <img src={provider.icon} style={{ width: '100%' }} />
+                    <img src={provider.icon} style={{ width: '100%' }} decoding="async" loading="lazy" draggable={false} alt={provider.name} />
                   </div>
                   <div className="provider-grid-name">{provider.name}</div>
                 </div>
               ))}
-              {filteredProviders.length === 0 && (
+              {filteredAllProviders.length === 0 && (
                 <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 20, color: '#666' }}>
                   No providers found
                 </div>
@@ -895,30 +854,33 @@ const AccountManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Support Modal */}
+      {/* Support / About Modal */}
       {showSupportModal && (
-        <div className={`modal active`} onClick={() => setShowSupportModal(false)}>
-           <div className="modal-content simple-modal" onClick={e => e.stopPropagation()}>
-             <div className="modal-header">
-               <div className="modal-title">About SocialHub</div>
-               <div className="modal-close" onClick={() => setShowSupportModal(false)}>
-                 <i className="fas fa-times"></i>
-               </div>
-             </div>
-             <div className="modal-body" style={{ textAlign: 'center' }}>
-                <div style={{ marginBottom: 15 }}>
-                  <img src="./icons/icon.png" style={{ width: 64, height: 64 }} />
-                </div>
-                <h3>SocialHub Messenger</h3>
-                <p>Version 1.0.0</p>
-                <p style={{ marginTop: 10, color: '#666' }}>All-in-one messenger for your desktop.</p>
-             </div>
-             <div className="modal-footer">
-               <button className="btn btn-primary" onClick={() => setShowSupportModal(false)}>Close</button>
-             </div>
-           </div>
+        <div className="modal active" onClick={() => setShowSupportModal(false)}>
+          <div className="modal-content simple-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div className="modal-title">About SocialHub</div>
+              <div className="modal-close" onClick={() => setShowSupportModal(false)}>
+                <i className="fas fa-times"></i>
+              </div>
+            </div>
+            <div className="modal-body" style={{ textAlign: 'center' }}>
+              <div style={{ marginBottom: 15 }}>
+                <img src="./icons/icon.png" style={{ width: 64, height: 64 }} alt="SocialHub" />
+              </div>
+              <h3>SocialHub Messenger</h3>
+              <p>Version 1.0.1</p>
+              <p style={{ marginTop: 10, color: '#666' }}>All-in-one messenger for your desktop.</p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setShowSupportModal(false)}>Close</button>
+            </div>
+          </div>
         </div>
       )}
+
+      {/* Update notification (auto-updater) */}
+      <UpdateNotification />
     </div>
   );
 };

@@ -1,12 +1,12 @@
-import { providers } from "../data/providers";
+import { ALL_PROVIDERS } from '../data/providers';
 
-export default function Sidebar({ active, onSelect }: any) {
+export default function Sidebar({ active, onSelect }: { active: number; onSelect: (id: number) => void }) {
   return (
     <div className="sidebar">
-      {providers.map(p => (
+      {ALL_PROVIDERS.map(p => (
         <div
           key={p.id}
-          className={`provider-icon ${active === p.id ? "active" : ""}`}
+          className={`provider-icon ${active === p.id ? 'active' : ''}`}
           onClick={() => onSelect(p.id)}
         >
           <i className={p.icon}></i>

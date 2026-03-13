@@ -1,118 +1,99 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 const UpdateNotification: React.FC = () => {
-  const [updateAvailable, setUpdateAvailable] = useState<boolean>(false);
-  const [version, setVersion] = useState<string>('');
-  const [downloading, setDownloading] = useState<boolean>(false);
-  const [progress, setProgress] = useState<number>(0);
-  const [updateReady, setUpdateReady] = useState<boolean>(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [version,         setVersion]         = useState('');
+  const [downloading,     setDownloading]     = useState(false);
+  const [progress,        setProgress]        = useState(0);
+  const [updateReady,     setUpdateReady]     = useState(false);
 
   useEffect(() => {
     const api = (window as any).electronAPI;
     if (!api) return;
 
-    // Check for updates on mount
-    api.checkForUpdates();
-
-    // Listeners
-    api.onUpdateAvailable((info: any) => {
+    api.onUpdateAvailable?.((info: any) => {
       setUpdateAvailable(true);
-      setVersion(info.version);
+      setVersion(info?.version ?? '');
     });
 
-    api.onDownloadProgress((progressObj: any) => {
+    api.onDownloadProgress?.((obj: any) => {
       setDownloading(true);
-      setProgress(progressObj.percent);
+      setProgress(Math.round(obj?.percent ?? 0));
     });
 
-    api.onUpdateDownloaded(() => {
+    api.onUpdateDownloaded?.(() => {
       setDownloading(false);
       setUpdateReady(true);
     });
 
+    // Cleanup on unmount — removes all auto-update IPC listeners
+    return () => {
+      try { api.offUpdateListeners?.(); } catch {}
+    };
   }, []);
 
-  const startDownload = () => {
+  const startDownload = useCallback(() => {
     const api = (window as any).electronAPI;
-    if (api) {
-      api.startDownloadUpdate();
-      setDownloading(true);
-    }
-  };
+    api?.startDownloadUpdate?.();
+    setDownloading(true);
+  }, []);
 
-  const restartApp = () => {
+  const restartApp = useCallback(() => {
     const api = (window as any).electronAPI;
-    if (api) {
-      api.quitAndInstallUpdate();
-    }
-  };
+    api?.quitAndInstallUpdate?.();
+  }, []);
 
   if (!updateAvailable && !downloading && !updateReady) return null;
 
   return (
     <div style={{
       position: 'fixed',
-      bottom: '20px',
-      right: '20px',
-      backgroundColor: '#1e1e1e',
-      padding: '15px',
-      borderRadius: '8px',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+      bottom: 20,
+      right: 20,
+      background: '#1e1e2e',
+      padding: '14px 16px',
+      borderRadius: 10,
+      boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
       zIndex: 9999,
       color: 'white',
       display: 'flex',
       flexDirection: 'column',
-      gap: '10px',
-      minWidth: '250px',
-      border: '1px solid #333'
+      gap: 10,
+      minWidth: 260,
+      border: '1px solid #333',
+      fontSize: 13,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontWeight: 'bold' }}>
-          {updateReady ? 'Update Ready' : downloading ? 'Downloading Update...' : 'Update Available'}
+        <span style={{ fontWeight: 600 }}>
+          {updateReady ? '✅ Update Ready' : downloading ? '⬇ Downloading…' : '🔔 Update Available'}
         </span>
         {version && <span style={{ fontSize: '0.8em', color: '#aaa' }}>v{version}</span>}
       </div>
 
       {downloading && (
-        <div style={{ width: '100%', backgroundColor: '#333', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
-          <div style={{ 
-            width: `${progress}%`, 
-            backgroundColor: '#00B2FF', 
-            height: '100%', 
-            transition: 'width 0.3s ease' 
+        <div style={{ width: '100%', background: '#333', height: 5, borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{
+            width: `${progress}%`,
+            background: '#3b82f6',
+            height: '100%',
+            transition: 'width 0.3s ease',
           }} />
         </div>
       )}
 
       {!downloading && !updateReady && (
-        <button 
+        <button
           onClick={startDownload}
-          style={{
-            backgroundColor: '#00B2FF',
-            color: 'white',
-            border: 'none',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
+          style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '7px 12px', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
         >
           Download Update
         </button>
       )}
 
       {updateReady && (
-        <button 
+        <button
           onClick={restartApp}
-          style={{
-            backgroundColor: '#25d366',
-            color: 'white',
-            border: 'none',
-            padding: '8px 12px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
+          style={{ background: '#25d366', color: 'white', border: 'none', padding: '7px 12px', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}
         >
           Restart to Update
         </button>
