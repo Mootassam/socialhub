@@ -32,9 +32,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   closeApp:     () => ipcRenderer.invoke('close-app'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
-  // Settings
+  // Settings & App State
   loadSettings: ()      => ipcRenderer.invoke('load-settings'),
   saveSettings: (data)  => ipcRenderer.invoke('save-settings', data),
+  loadAppState: ()      => ipcRenderer.invoke('load-app-state'),
+  saveAppState: (data)  => ipcRenderer.invoke('save-app-state', data),
 
   // Webview preload path (cached in main)
   getPreloadPath:     () => ipcRenderer.invoke('get-preload-path'),

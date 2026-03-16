@@ -10,6 +10,12 @@ export interface ElectronAPI {
   maximizeApp: () => Promise<void>;
   closeApp: () => Promise<void>;
   
+  // Settings & State
+  loadSettings: () => Promise<any>;
+  saveSettings: (data: any) => Promise<boolean>;
+  loadAppState: () => Promise<{ providers: any[], accounts: Record<string, any[]> } | null>;
+  saveAppState: (data: { providers: any[], accounts: Record<string, any[]> } | null) => Promise<boolean>;
+  
   // External links
   openExternal: (url: string) => Promise<void>;
   

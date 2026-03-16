@@ -86,35 +86,35 @@ const AccountManager: React.FC = () => {
 
   // ── Persistence — Load on mount ────────────────────────────────────────────
   useEffect(() => {
-    try {
-      const savedProviders = localStorage.getItem('providers');
-      const savedAccounts  = localStorage.getItem('accounts');
+    const initApp = async () => {
+      try {
+        const appState = api?.loadAppState ? await api.loadAppState() : null;
 
-      if (savedProviders) {
-        const parsed: Provider[] = JSON.parse(savedProviders);
-        setProviders(parsed.map(p => ({ ...p, muted: p.muted ?? false })));
-      } else {
-        // Default: WhatsApp with one account
-        setProviders([{ id: 1, name: 'WhatsApp', icon: './provider/whatsapp.png', color: '#25d366', notifications: 0, muted: false }]);
-      }
+        if (appState && appState.providers) {
+          setProviders(appState.providers.map((p: Provider) => ({ ...p, muted: p.muted ?? false })));
+        } else {
+          // Default: WhatsApp with one account
+          setProviders([{ id: 1, name: 'WhatsApp', icon: './provider/whatsapp.png', color: '#25d366', notifications: 0, muted: false }]);
+        }
 
-      if (savedAccounts) {
-        const parsed: AccountMap = JSON.parse(savedAccounts);
-        const withDefaults: AccountMap = {};
-        Object.keys(parsed).forEach(key => {
-          const pid = Number(key);
-          withDefaults[pid] = (parsed[pid] || []).map(a => ({ ...a, muted: a.muted ?? false }));
-        });
-        setAccounts(withDefaults);
-      } else {
-        setAccounts({ 1: [{ id: 101, name: 'Account 1', notifications: 0, color: '#25d366', muted: false }] });
-        setActiveProviderId(1);
-        setActiveAccountId(101);
-      }
-    } catch { /* ignore corrupt storage */ }
+        if (appState && appState.accounts) {
+          const withDefaults: AccountMap = {};
+          Object.keys(appState.accounts).forEach(key => {
+            const pid = Number(key);
+            withDefaults[pid] = (appState.accounts[key] || []).map((a: Account) => ({ ...a, muted: a.muted ?? false }));
+          });
+          setAccounts(withDefaults);
+        } else {
+          setAccounts({ 1: [{ id: 101, name: 'Account 1', notifications: 0, color: '#25d366', muted: false }] });
+          setActiveProviderId(1);
+          setActiveAccountId(101);
+        }
+      } catch { /* ignore corrupt storage */ }
 
-    const timer = setTimeout(() => setIsLoading(false), 80);
-    return () => clearTimeout(timer);
+      setIsLoading(false);
+    };
+
+    initApp();
   }, []);
 
   // Set sensible default active IDs once providers/accounts are loaded
@@ -131,13 +131,17 @@ const AccountManager: React.FC = () => {
 
   // ── Persistence — Save on change (debounced) ───────────────────────────────
   useEffect(() => {
-    const t = setTimeout(() => {
-      try {
+    // Only save when we actually have state loaded
+    if (providers.length === 0 && Object.keys(accounts).length === 0) return;
+    try {
+      if (api?.saveAppState) {
+        // Fire to disk immediately to prevent data loss on close
+        api.saveAppState({ providers, accounts });
+      } else {
         localStorage.setItem('providers', JSON.stringify(providers));
         localStorage.setItem('accounts',  JSON.stringify(accounts));
-      } catch {}
-    }, 1200);
-    return () => clearTimeout(t);
+      }
+    } catch {}
   }, [providers, accounts]);
 
   // ── Sync provider notification counts from accounts (debounced) ────────────
@@ -485,7 +489,10 @@ const AccountManager: React.FC = () => {
   const handleResetApp = useCallback(async () => {
     if (!confirm('Factory Reset: delete all accounts, sessions, and settings?')) return;
     localStorage.clear();
-    try { await api?.clearAllData?.(); } catch {}
+    try {
+      if (api?.saveAppState) await api.saveAppState(null);
+      await api?.clearAllData?.();
+    } catch {}
     window.location.reload();
   }, []);
 

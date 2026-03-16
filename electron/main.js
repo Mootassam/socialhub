@@ -32,6 +32,7 @@ if (process.platform === 'win32') {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 const SETTINGS_PATH = () => path.join(app.getPath('userData'), 'settings.json');
+const APP_STATE_PATH = () => path.join(app.getPath('userData'), 'app-state.json');
 
 const DEFAULT_SETTINGS = {
   minimizeToTray: true,
@@ -59,6 +60,31 @@ function saveSettings(data) {
     return false;
   }
 }
+
+function loadAppState() {
+  try {
+    const raw = fs.readFileSync(APP_STATE_PATH(), 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return null; // Signals the app to load defaults
+  }
+}
+
+function saveAppState(data) {
+  try {
+    if (!data) {
+      if (fs.existsSync(APP_STATE_PATH())) {
+        fs.unlinkSync(APP_STATE_PATH());
+      }
+      return true;
+    }
+    fs.writeFileSync(APP_STATE_PATH(), JSON.stringify(data, null, 2), 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 
 // ─── Provider Names (single source of truth) ──────────────────────────────────
 const PROVIDER_NAMES = {
@@ -96,13 +122,17 @@ let activeContext = { providerId: null, accountId: null };
 
 // ─── createWindow ─────────────────────────────────────────────────────────────
 function createWindow() {
+  const iconPath = isDev 
+    ? path.join(__dirname, '../app/public/icons/icon.png')
+    : path.join(__dirname, '../public/icons/icon.png');
+
   mainWindow = new BrowserWindow({
     show: false,
     width: 1280,
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    icon: path.join(__dirname, '../public/icons/icon.png'),
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -170,8 +200,17 @@ function createWindow() {
 
 // ─── Tray ──────────────────────────────────────────────────────────────────────
 function createTray() {
-  const iconPath = path.join(__dirname, '../public/icons/tray-icon.png');
-  tray = new Tray(fs.existsSync(iconPath) ? iconPath : path.join(__dirname, '../public/icons/icon.png'));
+  const trayIconPath = isDev 
+    ? path.join(__dirname, '../app/public/icons/tray-icon.png')
+    : path.join(__dirname, '../public/icons/tray-icon.png');
+  const fallbackIconPath = isDev
+    ? path.join(__dirname, '../app/public/icons/icon.png')
+    : path.join(__dirname, '../public/icons/icon.png');
+    
+  let activeIcon = fs.existsSync(trayIconPath) ? trayIconPath : (fs.existsSync(fallbackIconPath) ? fallbackIconPath : undefined);
+  if (!activeIcon) return; // Prevent crash if neither exists
+  
+  tray = new Tray(activeIcon);
 
   const buildMenu = () => Menu.buildFromTemplate([
     {
@@ -241,9 +280,11 @@ ipcMain.handle('maximize-app', () => {
 ipcMain.handle('close-app', () => mainWindow?.close());
 ipcMain.handle('open-external', (_e, url) => shell.openExternal(url));
 
-// ─── IPC — Settings ───────────────────────────────────────────────────────────
+// ─── IPC — Settings & App State ───────────────────────────────────────────────────────────
 ipcMain.handle('load-settings', () => ({ ...appSettings }));
 ipcMain.handle('save-settings', (_e, data) => saveSettings(data));
+ipcMain.handle('load-app-state', () => loadAppState());
+ipcMain.handle('save-app-state', (_e, data) => saveAppState(data));
 
 // ─── IPC — Active Context (notification suppression) ─────────────────────────
 ipcMain.on('active-context', (_e, data) => {
@@ -488,6 +529,9 @@ ipcMain.handle('clear-all-data', async () => {
     const partitionsPath = path.join(app.getPath('userData'), 'Partitions');
     if (fs.existsSync(partitionsPath)) {
       fs.rmSync(partitionsPath, { recursive: true, force: true });
+    }
+    if (fs.existsSync(APP_STATE_PATH())) {
+      fs.unlinkSync(APP_STATE_PATH());
     }
 
     return true;
